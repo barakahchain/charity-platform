@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+
+contract Project is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
+    address public charity;          // Operational manager
+    address payable public builder;  // Fund recipient
+    address public platform;         // Platform admin (for emergency)
+
+    uint256 public goal;
+    uint256 public deadline;
+    string public metaCid;
+
+    struct Milestone {
+        uint128 amount;
+        bool released;
+    }
+    Milestone[] public milestones;
+
+    uint256 public totalDonated;
+    mapping(address => uint256) public donations;
+
+    bool public completed;
+
+    event Donated(address indexed donor, uint256 amount);
+    event MilestoneReleased(uint256 indexed index, uint256 amount);
+    event ProjectCompleted();
+    event ProjectFailed();
+    event EmergencyPaused(address indexed byPlatform);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice initialize is called instead of constructor (for clones)
+    function initialize(
+        address _platform,     // Add platform address
+        address _charity,      // Change to non-payable
+        address payable _builder,
+        uint256 _goal,
+        uint256 _deadline,
+        string memory _metaCid,
+        uint256[] memory _milestoneAmounts
+    ) external initializer {
+        require(_platform != address(0), "Invalid platform");
+        require(_charity != address(0), "Invalid charity");
+        require(_builder != address(0), "Invalid builder");
+        require(_deadline > block.timestamp, "Deadline must be in future");
+        require(_goal > 0, "Goal >0");
+        require(_milestoneAmounts.length > 0, "Milestones required");
+
+        // Platform becomes owner (for emergency controls)
+        __Ownable_init(_platform);
+        __ReentrancyGuard_init();
+        __Pausable_init();
+
+        platform = _platform;
+        charity = _charity;
+        builder = _builder;
+        goal = _goal;
+        deadline = _deadline;
+        metaCid = _metaCid;
+
+        uint256 totalMilestones;
+        for (uint i = 0; i < _milestoneAmounts.length; i++) {
+            require(_milestoneAmounts[i] > 0, "Milestone >0");
+            totalMilestones += _milestoneAmounts[i];
+            milestones.push(Milestone({
+                amount: uint128(_milestoneAmounts[i]),
+                released: false
+            }));
+        }
+
+        require(totalMilestones <= _goal, "Milestones exceed goal");
+    }
+
+    modifier onlyCharity() {
+        require(msg.sender == charity, "Only charity");
+        _;
+    }
+
+    modifier onlyPlatform() {
+        require(msg.sender == platform, "Only platform");
+        _;
+    }
+
+    /// @notice Donate to this project, contributing funds
+    function donate() external payable whenNotPaused nonReentrant {
+        require(block.timestamp <= deadline, "Deadline passed");
+        require(!completed, "Already completed");
+        require(msg.value > 0, "Donate >0");
+        require(totalDonated + msg.value <= goal, "Exceeds goal");
+
+        donations[msg.sender] += msg.value;
+        totalDonated += msg.value;
+
+        emit Donated(msg.sender, msg.value);
+    }
+
+    /// @notice Release a milestone payment (only charity can call)
+    function releaseMilestone(uint256 index) external onlyCharity nonReentrant {
+        require(!completed, "Completed");
+        require(index < milestones.length, "Invalid milestone");
+        Milestone storage m = milestones[index];
+        require(!m.released, "Already released");
+        require(address(this).balance >= m.amount, "Insufficient balance");
+
+        m.released = true;
+        (bool success, ) = builder.call{ value: m.amount }("");
+        require(success, "Transfer failed");
+
+        emit MilestoneReleased(index, m.amount);
+
+        if (_allMilestonesReleased()) {
+            completed = true;
+            emit ProjectCompleted();
+        }
+    }
+
+    /// @notice Allow donors to claim refund if deadline passed and goal not met
+    function claimRefund() external nonReentrant {
+        require(block.timestamp > deadline, "Deadline not passed");
+        require(!completed, "Project completed");
+        require(totalDonated < goal, "Goal met");
+
+        uint256 donation = donations[msg.sender];
+        require(donation > 0, "No donation to refund");
+
+        donations[msg.sender] = 0;
+        (bool success, ) = msg.sender.call{ value: donation }("");
+        require(success, "Refund failed");
+    }
+
+    // Charity operational controls
+    function pause() external onlyCharity {
+        _pause();
+    }
+
+    function unpause() external onlyCharity {
+        _unpause();
+    }
+
+    // Platform emergency controls
+    function emergencyPause() external onlyPlatform {
+        _pause();
+        emit EmergencyPaused(msg.sender);
+    }
+
+    function getProjectInfo() external view returns (
+        address _platform,
+        address _charity,
+        address _builder,
+        uint256 _goal,
+        uint256 _deadline,
+        bool _completed
+    ) {
+        return (platform, charity, builder, goal, deadline, completed);
+    }
+
+    function milestoneCount() external view returns (uint256) {
+        return milestones.length;
+    }
+
+    function getMilestone(uint256 index) external view returns (uint256 amount, bool released) {
+        require(index < milestones.length, "Invalid milestone");
+        Milestone storage m = milestones[index];
+        return (m.amount, m.released);
+    }
+
+    function _allMilestonesReleased() internal view returns (bool) {
+        for (uint i = 0; i < milestones.length; i++) {
+            if (!milestones[i].released) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
