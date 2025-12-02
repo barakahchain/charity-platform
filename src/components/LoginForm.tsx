@@ -12,12 +12,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { useAuthStore } from "@/app/stores/auth-store";
 
 export default function LoginForm() {
   const router = useRouter();
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const login = useAuthStore((state) => state.login);
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
@@ -28,6 +30,7 @@ export default function LoginForm() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
+      credentials: "include", // Important for cookies
     });
 
     const data = await res.json();
@@ -38,9 +41,20 @@ export default function LoginForm() {
       return;
     }
 
-    // Redirect or reload to reflect session
-    router.refresh();
-    router.push("/dashboard");
+    // Update Zustand store with user data
+    login(data.user);
+    console.log('User logged in:', data.user);
+
+    // Redirect based on role
+    const redirectPath =
+      data.user.role === "charity"
+        ? "/"
+        : data.user.role === "donor"
+          ? "/"
+          : "/";
+
+    router.push(redirectPath);
+    router.refresh(); // Optional: refresh server components
   };
 
   return (
@@ -69,9 +83,7 @@ export default function LoginForm() {
                 type="password"
                 placeholder="••••••••"
                 value={form.password}
-                onChange={(e) =>
-                  setForm({ ...form, password: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
                 required
               />
             </div>

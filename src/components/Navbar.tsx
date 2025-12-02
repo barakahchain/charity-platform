@@ -5,6 +5,11 @@ import { WalletConnect } from "./WalletConnect";
 import { Button } from "./ui/button";
 import { Shield, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
+import {
+  useUser,
+  useIsAuthenticated,
+  useAuthStore, // Import the store directly
+} from "@/app/stores/auth-store";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
 import {
   DropdownMenu,
@@ -17,7 +22,14 @@ import {
 export function Navbar() {
   const [isMounted, setIsMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [user, setUser] = useState<{ name?: string; id?: number;  } | null>(null);
+  
+  // Zustand hooks - Select actions individually
+  const user = useUser();
+  const isAuthenticated = useIsAuthenticated();
+  
+  // Select actions individually to avoid object reference changes
+  const logout = useAuthStore((state) => state.logout);
+  const checkAuth = useAuthStore((state) => state.checkAuth);
 
   const navLinks = [
     { href: "/", label: "Home" },
@@ -27,27 +39,17 @@ export function Navbar() {
     { href: "/projects", label: "Browse Projects" },
   ];
 
-  // Fetch session
+  // Wait for hydration AND check auth once
   useEffect(() => {
     setIsMounted(true);
-
-    async function loadUser() {
-      try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
-        const data = await res.json();
-        if (data.user) setUser(data.user);
-        console.log("Fetched user:", data.user);
-      } catch (e) {}
-    }
-
-    loadUser();
-  }, []);
+    checkAuth(); // Check auth once on mount
+  }, [checkAuth]); // Add checkAuth to dependencies
 
   async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    window.location.reload();
+    await logout();
   }
 
+  // Show loading skeleton until hydrated
   if (!isMounted) {
     return (
       <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -93,7 +95,7 @@ export function Navbar() {
             <WalletConnect />
 
             {/* Login OR User Menu */}
-            {!user ? (
+            {!isAuthenticated ? (
               <Link href="/login">
                 <Button variant="outline">Login</Button>
               </Link>
@@ -101,11 +103,13 @@ export function Navbar() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="secondary" className="font-medium">
-                    {user.name ?? "Account"}
+                    {user?.name ?? "Account"}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuLabel>Signed in as {user.name}</DropdownMenuLabel>
+                  <DropdownMenuLabel>
+                    Signed in as {user?.name}
+                  </DropdownMenuLabel>
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard">Dashboard</Link>
                   </DropdownMenuItem>
@@ -144,7 +148,7 @@ export function Navbar() {
                 <div className="pt-4 border-t flex flex-col gap-3">
                   <WalletConnect />
 
-                  {!user ? (
+                  {!isAuthenticated ? (
                     <Link href="/login" onClick={() => setIsOpen(false)}>
                       <Button variant="outline" className="w-full">
                         Login
@@ -153,7 +157,8 @@ export function Navbar() {
                   ) : (
                     <div className="flex flex-col gap-2">
                       <div className="text-sm text-muted-foreground">
-                        Signed in as <span className="font-medium">{user.name}</span>
+                        Signed in as{" "}
+                        <span className="font-medium">{user?.name}</span>
                       </div>
 
                       <Link href="/dashboard" onClick={() => setIsOpen(false)}>

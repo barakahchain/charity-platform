@@ -4,23 +4,12 @@ import { db } from "@/db"; // your Drizzle + Turso client
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT } from "jose";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 const COOKIE_NAME = "session";
 
-function setCookie(token: string) {
-  const res = NextResponse.json({ success: true });
-  res.cookies.set({
-    name: COOKIE_NAME,
-    value: token,
-    httpOnly: true,
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-  });
-  return res;
-}
+// Removed the old setCookie function - we'll create response inline
 
 export async function POST(req: Request) {
   const { email, password } = await req.json();
@@ -45,15 +34,39 @@ export async function POST(req: Request) {
   if (!valid) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
-//   console.log("User authenticated:", user);
 
-  // 3. Create JWT
-  const jwt = await new SignJWT({ userId: user.id, name: user.name, role: user.role })
+  // 3. Prepare user data for JWT and response
+  const userData = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    kycStatus: user.kycStatus,
+  };
+
+  // 4. Create JWT
+  const jwt = await new SignJWT({ ...userData })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("1h")
     .sign(new TextEncoder().encode(JWT_SECRET));
-//   console.log("Generated JWT:", jwt);
-  // 4. Set cookie & return
-  return setCookie(jwt);
+
+  // 5. Create response with user data AND set cookie
+  const response = NextResponse.json({ 
+    success: true, 
+    user: userData  // 👈 THIS IS CRITICAL for Zustand
+  });
+  
+  // Set the JWT as an HTTP-only cookie
+  response.cookies.set({
+    name: COOKIE_NAME,
+    value: jwt,
+    httpOnly: true,
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60, // 1 hour in seconds
+  });
+  
+  return response;
 }
