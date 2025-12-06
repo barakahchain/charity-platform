@@ -2,7 +2,8 @@ import { createWalletClient, createPublicClient, http, parseEther } from "viem";
 import { polygonAmoy } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import * as dotenv from "dotenv";
-import ProjectFactoryAbi from "../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json" assert { type: "json" };
+// import ProjectFactoryAbi from "../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json" assert { type: "json" };
+import ProjectFactoryAbi from "../src/lib/abis/ProjectFactory.json" assert { type: "json" };
 
 dotenv.config();
 

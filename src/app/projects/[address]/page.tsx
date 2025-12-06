@@ -43,6 +43,8 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useUser } from "@/app/stores/auth-store";
+// import { abi as ProjectAbi } from "@/lib/abis/Project.json";
+import ProjectAbi from "@/lib/abis/Project.json";
 
 // Reuse your existing interfaces
 interface ProjectMetadata {
@@ -72,72 +74,8 @@ interface ProjectData {
   metadata?: ProjectMetadata;
 }
 
-// Project ABI - Add donate function
-const PROJECT_ABI = [
-  {
-    name: "goal",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    name: "deadline",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    name: "completed",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    name: "charity",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    name: "builder",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    name: "totalDonated",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    name: "deadlineEnabled",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    name: "metaCid",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "string" }],
-    stateMutability: "view",
-  },
-  {
-    name: "donate",
-    type: "function",
-    inputs: [],
-    stateMutability: "payable",
-    outputs: [],
-  },
-] as const;
+// Use the imported ABI from Project.json
+const PROJECT_ABI = ProjectAbi.abi;
 
 export default function ProjectPage({
   params,
@@ -173,13 +111,28 @@ export default function ProjectPage({
     hash: string;
   } | null>(null);
 
-  // Fetch project data
+  // Fix the ABI type issue by filtering only function types
+  const getViewFunctions = (abi: any[]) => {
+    return abi.filter(
+      (item) =>
+        item.type === "function" &&
+        (item.stateMutability === "view" || item.stateMutability === "pure")
+    );
+  };
+
+  // Get all view functions from the ABI
+  const viewFunctions = getViewFunctions(PROJECT_ABI);
+
+  // Create contracts configuration with proper typing
+  const contracts = viewFunctions.map((func) => ({
+    address: address as `0x${string}`,
+    abi: [func] as const, // Wrap in array and cast as const
+    functionName: func.name,
+  }));
+
+  // Fetch project data using all view functions
   const { data: projectData } = useReadContracts({
-    contracts: PROJECT_ABI.map((abiItem) => ({
-      address: address as `0x${string}`,
-      abi: PROJECT_ABI,
-      functionName: abiItem.name,
-    })),
+    contracts,
   });
 
   // Update the fetchMetadataFromIPFS function to handle null/undefined
@@ -218,16 +171,23 @@ export default function ProjectPage({
     if (!projectData) return;
 
     try {
-      const [
-        goal,
-        deadline,
-        completed,
-        charity,
-        builder,
-        totalDonated,
-        deadlineEnabled,
-        metaCid,
-      ] = projectData.map((item) => item.result);
+      // Create a map of function names to results
+      const resultMap: Record<string, any> = {};
+      viewFunctions.forEach((func, index) => {
+        if (projectData[index]?.status === "success") {
+          resultMap[func.name] = projectData[index].result;
+        }
+      });
+
+      // Extract values with defaults
+      const goal = resultMap.goal || BigInt(0);
+      const deadline = resultMap.deadline || BigInt(0);
+      const completed = resultMap.completed || false;
+      const charity = resultMap.charity || "";
+      const builder = resultMap.builder || "";
+      const totalDonated = resultMap.totalDonated || BigInt(0);
+      const deadlineEnabled = resultMap.deadlineEnabled || false;
+      const metaCid = resultMap.metaCid || "";
 
       // Fetch IPFS metadata (only if metaCid exists)
       let metadata: ProjectMetadata | undefined;
@@ -241,13 +201,13 @@ export default function ProjectPage({
 
       setProject({
         address: address,
-        goal: (goal as bigint) || BigInt(0),
-        deadline: (deadline as bigint) || BigInt(0),
-        completed: (completed as boolean) || false,
-        charity: (charity as string) || "",
-        builder: (builder as string) || "",
-        totalDonated: (totalDonated as bigint) || BigInt(0),
-        deadlineEnabled: (deadlineEnabled as boolean) || false,
+        goal: goal as bigint,
+        deadline: deadline as bigint,
+        completed: completed as boolean,
+        charity: charity as string,
+        builder: builder as string,
+        totalDonated: totalDonated as bigint,
+        deadlineEnabled: deadlineEnabled as boolean,
         metadata,
       });
     } catch (error) {

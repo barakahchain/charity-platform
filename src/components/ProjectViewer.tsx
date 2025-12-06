@@ -4,7 +4,9 @@ import React, { useEffect, useState, useCallback } from "react";
 import { createPublicClient, http, parseEther } from "viem";
 import { polygonAmoy } from "viem/chains";
 import { useAccount, useWalletClient } from "wagmi";
-import { abi as ProjectAbi } from "../../artifacts/contracts/Project.sol/Project.json";
+// import { abi as ProjectAbi } from "../../artifacts/contracts/Project.sol/Project.json";
+// import { abi as ProjectAbi } from "@/lib/abis/Project.json";
+import ProjectAbi from "@/lib/abis/Project.json";
 import { WalletConnect } from "./WalletConnect";
 
 const publicClient = createPublicClient({
@@ -46,7 +48,7 @@ export default function ProjectViewer({
       // 1️⃣ Get project base info
       const info = (await publicClient.readContract({
         address: cloneAddress,
-        abi: ProjectAbi,
+        abi: ProjectAbi.abi,
         functionName: "getProjectInfo",
       })) as [string, string, string, bigint, bigint, boolean];
 
@@ -62,7 +64,7 @@ export default function ProjectViewer({
       // 2️⃣ Get milestone details
       const milestoneCount = (await publicClient.readContract({
         address: cloneAddress,
-        abi: ProjectAbi,
+        abi: ProjectAbi.abi,
         functionName: "milestoneCount",
       })) as bigint;
 
@@ -70,7 +72,7 @@ export default function ProjectViewer({
       for (let i = 0; i < Number(milestoneCount); i++) {
         const [amount, released] = (await publicClient.readContract({
           address: cloneAddress,
-          abi: ProjectAbi,
+          abi: ProjectAbi.abi,
           functionName: "getMilestone",
           args: [BigInt(i)],
         })) as [bigint, boolean];
@@ -82,7 +84,7 @@ export default function ProjectViewer({
       // 3️⃣ Get total donated amount
       const donated = (await publicClient.readContract({
         address: cloneAddress,
-        abi: ProjectAbi,
+        abi: ProjectAbi.abi,
         functionName: "totalDonated",
       })) as bigint;
 

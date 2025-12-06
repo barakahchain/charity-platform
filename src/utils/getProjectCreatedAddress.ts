@@ -1,5 +1,7 @@
 import { parseEventLogs, type TransactionReceipt } from "viem";
-import * as factoryJSON from "@/../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json";
+// import * as factoryJSON from "@/../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json";
+// import * as factoryJSON from "@/lib/abis/ProjectFactory.json";
+import factoryJSON from "@/lib/abis/ProjectFactory.json";
 
 export function getProjectCreatedAddress(receipt: TransactionReceipt) {
   const ProjectFactoryABI = factoryJSON.abi;

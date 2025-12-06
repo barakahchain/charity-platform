@@ -9,7 +9,8 @@ import { polygonAmoy } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import * as dotenv from "dotenv";
 
-import ProjectAbi from "../artifacts/contracts/Project.sol/Project.json" assert { type: "json" };
+// import ProjectAbi from "../artifacts/contracts/Project.sol/Project.json" assert { type: "json" };
+import ProjectAbi from "@/lib/abis/Project.json" assert { type: "json" };
 
 dotenv.config();
 

@@ -19,6 +19,7 @@
     "@heroicons/react": "^2.2.0",
     "@hookform/resolvers": "^5.1.1",
     "@libsql/client": "^0.15.15",
+    "@metamask/sdk": "^0.33.1",
     "@nomicfoundation/hardhat-verify": "^3.0.3",
     "@number-flow/react": "^0.5.10",
     "@openzeppelin/contracts": "^5.4.0",

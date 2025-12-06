@@ -31,7 +31,10 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { uploadJSONToIPFS } from "@/lib/ipfs";
 // import { ProjectFactoryABI } from "@/lib/abis/ProjectFactoryABI";
-import * as factoryJSON from "../../../../../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json";
+// import * as factoryJSON from "@/lib/abis/ProjectFactory.json";
+import factoryJSON from "@/lib/abis/ProjectFactory.json";
+
+// import * as factoryJSON from "../../../../../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json";
 import {
   Select,
   SelectContent,
