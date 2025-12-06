@@ -29,7 +29,7 @@ interface ProjectInput {
 //   try {
 //     // 1. Get authenticated user
 //     const user = await requireRole(request, "charity");
-    
+
 //     // 2. Parse request body
 //     const body: ProjectInput = await request.json();
 //     const {
@@ -49,7 +49,7 @@ interface ProjectInput {
 //         { error: "title is required", code: "INVALID_TITLE" },
 //         { status: 400 }
 //       );
-    
+
 //     if (!description?.trim())
 //       return NextResponse.json(
 //         { error: "description is required", code: "INVALID_DESCRIPTION" },
@@ -72,13 +72,13 @@ interface ProjectInput {
 //         { status: 400 }
 //       );
 //     }
-    
+
 //     if (!totalAmount || totalAmount <= 0)
 //       return NextResponse.json(
 //         { error: "totalAmount must be positive", code: "INVALID_TOTAL_AMOUNT" },
 //         { status: 400 }
 //       );
-    
+
 //     if (!milestonesData?.length)
 //       return NextResponse.json(
 //         { error: "milestones array is required", code: "INVALID_MILESTONES" },
@@ -167,7 +167,7 @@ interface ProjectInput {
 //     );
 //   } catch (error: any) {
 //     console.error("POST error:", error);
-    
+
 //     // Handle auth errors
 //     if (error.message.includes("Unauthorized") || error.message.includes("Forbidden")) {
 //       return NextResponse.json(
@@ -175,7 +175,7 @@ interface ProjectInput {
 //         { status: error.message.includes("Forbidden") ? 403 : 401 }
 //       );
 //     }
-    
+
 //     return NextResponse.json(
 //       { error: "Internal server error: " + error.message },
 //       { status: 500 }
@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
   try {
     // Get user from session
     const user = await getAuthenticatedUser(req);
-    
+
     if (!user) {
       return NextResponse.json(
         { error: "Unauthorized: Please log in" },
@@ -196,11 +196,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-     console.log("🔍 Authenticated user from JWT:", user);
+    console.log("🔍 Authenticated user from JWT:", user);
     console.log("🔍 User ID type:", typeof user.id, "Value:", user.id);
 
     const { searchParams } = new URL(req.url);
-    
+
     // Admin can view all or filter by charityId (for admin dashboard)
     if (user.role === "admin") {
       const charityId = searchParams.get("charityId");
@@ -213,17 +213,23 @@ export async function GET(req: NextRequest) {
         return NextResponse.json(charityProjects);
       }
       // Admin can see all projects if no charityId specified
-      const allProjects = await db.select().from(projects).orderBy(projects.createdAt);
+      const allProjects = await db
+        .select()
+        .from(projects)
+        .orderBy(projects.createdAt);
       return NextResponse.json(allProjects);
     }
-    
+
+    const userId =
+      typeof user.id === "string" ? parseInt(user.id, 10) : user.id;
+
     // Regular users (charity/donor) can only see their own projects
     // For charities: their created projects
     // For donors: projects they've donated to (you might want to add this)
     const userProjects = await db
       .select()
       .from(projects)
-      .where(eq(projects.charityId, user.id))
+      .where(eq(projects.charityId, userId))
       .orderBy(projects.createdAt);
 
     console.log("Fetched projects for user:", user.id, userProjects.length);

@@ -57,9 +57,10 @@ export default function CharityProjectsPage() {
         setLoading(true);
         setError(null);
 
-        // Fetch projects WITHOUT charityId parameter
-        // The API will use the authenticated user from JWT cookie
-        const projectsRes = await fetch(`/api/projects`);
+        // Fetch projects WITH credentials to include cookies
+        const projectsRes = await fetch(`/api/projects`, {
+          credentials: "include", // This is crucial!
+        });
         const projectsData = await projectsRes.json();
 
         if (!projectsRes.ok) {

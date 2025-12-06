@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   useAccount,
@@ -149,7 +149,7 @@ export default function ProjectPage({
   const router = useRouter();
   // Get user from Zustand
   const user = useUser();
-
+  
   const { isConnected } = useAccount();
   const { address: donorWalletAddress } = useAccount();
 
@@ -182,15 +182,59 @@ export default function ProjectPage({
     })),
   });
 
-  // Update the fetchMetadataFromIPFS function to handle null/undefined
-  const fetchMetadataFromIPFS = async (
-    cid: string | null | undefined
-  ): Promise<ProjectMetadata | undefined> => {
-    if (!cid || cid === "null" || cid === "undefined") {
-      console.warn("No metadata CID provided");
-      return undefined;
-    }
+  // Fetch and process project data
+  useEffect(() => {
+    const fetchProjectData = async () => {
+      if (!projectData) return;
 
+      try {
+        const [
+          goal,
+          deadline,
+          completed,
+          charity,
+          builder,
+          totalDonated,
+          deadlineEnabled,
+          metaCid,
+        ] = projectData.map((item) => item.result);
+
+        // Fetch IPFS metadata
+        let metadata: ProjectMetadata | undefined;
+        if (metaCid) {
+          try {
+            metadata = await fetchMetadataFromIPFS(metaCid as string);
+          } catch (error) {
+            console.warn("Could not fetch metadata:", error);
+          }
+        }
+
+        setProject({
+          address: address,
+          goal: (goal as bigint) || BigInt(0),
+          deadline: (deadline as bigint) || BigInt(0),
+          completed: (completed as boolean) || false,
+          charity: (charity as string) || "",
+          builder: (builder as string) || "",
+          totalDonated: (totalDonated as bigint) || BigInt(0),
+          deadlineEnabled: (deadlineEnabled as boolean) || false,
+          metadata,
+        });
+      } catch (error) {
+        console.error("Error processing project data:", error);
+        toast.error("Failed to load project data");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProjectData();
+  }, [projectData, address, dataVersion]);
+
+  // IPFS metadata fetcher (reuse your existing function)
+  const fetchMetadataFromIPFS = async (
+    cid: string
+  ): Promise<ProjectMetadata> => {
     const gateways = [
       `https://ipfs.io/ipfs/${cid}`,
       `https://cloudflare-ipfs.com/ipfs/${cid}`,
@@ -208,70 +252,14 @@ export default function ProjectPage({
         continue;
       }
     }
-
-    console.warn(`Could not fetch metadata from any gateway for CID: ${cid}`);
-    return undefined;
+    throw new Error(
+      `Could not fetch metadata from any gateway for CID: ${cid}`
+    );
   };
-
-  // Update the fetchProjectData function
-  const fetchProjectData = async () => {
-    if (!projectData) return;
-
-    try {
-      const [
-        goal,
-        deadline,
-        completed,
-        charity,
-        builder,
-        totalDonated,
-        deadlineEnabled,
-        metaCid,
-      ] = projectData.map((item) => item.result);
-
-      // Fetch IPFS metadata (only if metaCid exists)
-      let metadata: ProjectMetadata | undefined;
-      if (metaCid && metaCid !== "null" && metaCid !== "undefined") {
-        try {
-          metadata = await fetchMetadataFromIPFS(metaCid as string);
-        } catch (error) {
-          console.warn("Could not fetch metadata:", error);
-        }
-      }
-
-      setProject({
-        address: address,
-        goal: (goal as bigint) || BigInt(0),
-        deadline: (deadline as bigint) || BigInt(0),
-        completed: (completed as boolean) || false,
-        charity: (charity as string) || "",
-        builder: (builder as string) || "",
-        totalDonated: (totalDonated as bigint) || BigInt(0),
-        deadlineEnabled: (deadlineEnabled as boolean) || false,
-        metadata,
-      });
-    } catch (error) {
-      console.error("Error processing project data:", error);
-      toast.error("Failed to load project data");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Use a ref to track processed hashes to prevent multiple confirmations
-  const processedHashes = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const waitForConfirmation = async () => {
       if (donationHash && !isConfirmed && !isConfirming && !confirmationError) {
-        // Check if we've already processed this hash
-        if (processedHashes.current.has(donationHash)) {
-          console.log("Already processed this donation hash, skipping");
-          return;
-        }
-
-        // Mark this hash as being processed
-        processedHashes.current.add(donationHash);
         setIsConfirming(true);
         setConfirmationError(null);
 
@@ -291,39 +279,20 @@ export default function ProjectPage({
           setIsConfirmed(true);
 
           if (receipt.status === "success") {
-            // Save to database with user ID
-            const saveResult = await saveDonationToDB(
+            // Save to database
+            await saveDonationToDB(
               donationHash,
               donationAmount,
               Number(receipt.blockNumber)
             );
 
-            if (saveResult.success) {
-              // Show success popup instead of immediate reload
-              setSuccessData({
-                amount: donationAmount,
-                hash: donationHash,
-              });
-              setShowSuccessPopup(true);
-
-              if (saveResult.wasDuplicate) {
-                toast.success("✅ Donation was already recorded!");
-              } else {
-                toast.success(
-                  "✅ Donation confirmed and recorded successfully!"
-                );
-              }
-            } else {
-              toast.warning(
-                "✅ Donation confirmed on chain, but could not save record to database."
-              );
-              // Still show success popup
-              setSuccessData({
-                amount: donationAmount,
-                hash: donationHash,
-              });
-              setShowSuccessPopup(true);
-            }
+            // Show success popup instead of immediate reload
+            setSuccessData({
+              amount: donationAmount,
+              hash: donationHash,
+            });
+            setShowSuccessPopup(true);
+            toast.success("✅ Donation confirmed successfully!");
           } else {
             const errorMsg = "❌ Donation failed on chain";
             console.error(errorMsg);
@@ -334,7 +303,6 @@ export default function ProjectPage({
           console.error("❌ Error waiting for donation:", error);
 
           let errorMessage = "Failed to confirm donation";
-          let shouldContinue = false;
 
           if (error?.name === "TimeoutError") {
             errorMessage =
@@ -346,28 +314,18 @@ export default function ProjectPage({
           } else {
             // For other errors, assume the transaction might still be successful
             console.log("Assuming donation might be successful despite errors");
-            shouldContinue = true;
             toast.success(
               "Donation submitted! Check your wallet for confirmation."
             );
             setIsConfirmed(true);
-            // Try to save anyway (it will handle duplicates)
-            await saveDonationToDB(donationHash, donationAmount);
+            // Simple reload even on assumption of success
+            window.location.reload();
           }
 
-          if (shouldContinue) {
-            setSuccessData({
-              amount: donationAmount,
-              hash: donationHash,
-            });
-            setShowSuccessPopup(true);
-          } else {
-            setConfirmationError(errorMessage);
-          }
+          setConfirmationError(errorMessage);
         } finally {
           setIsConfirming(false);
           setDonationHash(null);
-          // Note: We keep the hash in processedHashes to prevent re-processing
         }
       }
     };
@@ -380,8 +338,6 @@ export default function ProjectPage({
     confirmationError,
     donationAmount,
     donorWalletAddress,
-    user,
-    address,
   ]);
 
   const saveDonationToDB = async (
@@ -390,80 +346,35 @@ export default function ProjectPage({
     blockNumber?: number
   ) => {
     try {
-      // Get the JWT token - check if using localStorage or cookies
-      let token: string | null = null;
-
-      // Try to get from localStorage
-      if (typeof window !== "undefined") {
-        token =
-          localStorage.getItem("token") || localStorage.getItem("auth-token");
-      }
-
-      // If no token in localStorage, check cookies
-      if (!token && typeof document !== "undefined") {
-        const cookieMatch = document.cookie.match(/token=([^;]+)/);
-        token = cookieMatch ? cookieMatch[1] : null;
-      }
-
-      // Include donorId from the logged-in user
-      const requestBody = {
-        projectAddress: address,
-        donorId: user?.id, // Use the logged-in user's ID
-        donorWalletAddress, // Still include wallet address for reference
-        amount: parseFloat(amount),
-        txHash,
-        blockNumber,
-      };
-
-      console.log("Saving donation to DB:", {
-        ...requestBody,
-        hasToken: !!token,
-      });
-
+      // Simple API call to record the donation
       const response = await fetch("/api/donations/record", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Only add Authorization header if we have a token
-          ...(token && { Authorization: `Bearer ${token}` }),
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          projectAddress: address,
+          donorWalletAddress,
+          amount: parseFloat(amount),
+          txHash,
+          blockNumber,
+        }),
       });
 
-      const result = await response.json();
-
       if (response.ok) {
-        console.log("✅ Donation recorded in database:", result);
-
-        // Check if it was a duplicate
-        if (response.status === 200 && result.warning) {
-          console.log("⚠️ Donation was already recorded previously");
-          return { success: true, wasDuplicate: true };
-        }
-
-        return { success: true, wasDuplicate: false };
+        console.log("✅ Donation recorded in database");
       } else {
-        console.warn("⚠️ Could not record donation in database:", result.error);
-        return { success: false, error: result.error };
+        console.warn("⚠️ Could not record donation in database");
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Failed to save donation to database:", error);
-      return { success: false, error: error.message };
     }
   };
 
-  // Update the donation button to check for user
+  // Donation function
   const handleDonate = async () => {
     if (!isConnected) {
       toast.error("Please connect your wallet first");
-      return;
-    }
-
-    // Check if user is logged in
-    if (!user) {
-      toast.error("Please log in to make a donation");
-      // Optionally redirect to login
-      // router.push('/login');
       return;
     }
 
@@ -566,25 +477,21 @@ export default function ProjectPage({
     window.open(`https://amoy.polygonscan.com/address/${address}`, "_blank");
   };
 
-  useEffect(() => {
-    fetchProjectData();
-  }, [projectData, address, dataVersion]);
-
-  // if (!isConnected) {
-  //   return (
-  //     <div className="container mx-auto px-4 py-20 max-w-6xl">
-  //       <Card className="border-2">
-  //         <CardHeader className="text-center">
-  //           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
-  //           <CardTitle>Connect Your Wallet</CardTitle>
-  //           <CardDescription>
-  //             Please connect your wallet to view project details
-  //           </CardDescription>
-  //         </CardHeader>
-  //       </Card>
-  //     </div>
-  //   );
-  // }
+  if (!isConnected) {
+    return (
+      <div className="container mx-auto px-4 py-20 max-w-6xl">
+        <Card className="border-2">
+          <CardHeader className="text-center">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
+            <CardTitle>Connect Your Wallet</CardTitle>
+            <CardDescription>
+              Please connect your wallet to view project details
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -726,8 +633,6 @@ export default function ProjectPage({
               size="lg"
               onClick={handleDonate}
               disabled={
-                !isConnected ||
-                !user ||
                 isDonating ||
                 isConfirming ||
                 !donationAmount ||

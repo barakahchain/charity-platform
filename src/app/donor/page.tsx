@@ -15,10 +15,12 @@ import {
   Download, 
   ExternalLink,
   AlertCircle,
-  Loader2
+  Loader2,
+  User
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useAuthStore } from "@/app/stores/auth-store"; // Assuming you have a Zustand store
 
 interface Milestone {
   id: number;
@@ -32,12 +34,14 @@ interface Project {
   title: string;
   description: string;
   charity: string;
+  charityName?: string; // Added for better display
   totalAmount: number;
   fundedBalance: number;
   zakatMode: boolean;
   asnafTag: string | null;
   status: string;
   milestones: Milestone[];
+  contractAddress?: string;
 }
 
 interface Donation {
@@ -46,6 +50,8 @@ interface Donation {
   amount: number;
   txHash: string;
   timestamp: string;
+  donorId: number | null;
+  donorWalletAddress: string;
 }
 
 interface Stats {
@@ -55,6 +61,7 @@ interface Stats {
 }
 
 export default function DonorDashboard() {
+  const { user, isAuthenticated } = useAuthStore(); // Get user from Zustand
   const { address, isConnected } = useAccount();
   const [activeTab, setActiveTab] = useState("all");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -63,42 +70,56 @@ export default function DonorDashboard() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (isConnected && address) {
+    if (isAuthenticated && user) {
       fetchDonorData();
     }
-  }, [isConnected, address]);
+  }, [isAuthenticated, user]);
 
   const fetchDonorData = async () => {
-    if (!address) return;
+    if (!user?.id) return;
     
     setIsLoading(true);
     try {
-      // Fetch stats
-      const statsRes = await fetch(`/api/stats/donor/${address}`);
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setStats(statsData);
+      // Fetch donor data using user ID
+      const response = await fetch(`/api/donations/donor/user/${user.id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`, // Include JWT if needed
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setDonations(data.donations || []);
+        setProjects(data.projects || []);
+        setStats(data.stats || { totalContributed: 0, activeProjects: 0, completedProjects: 0 });
+      } else {
+        console.error("Failed to fetch donor data");
+        toast.error("Failed to load donor data");
       }
+    } catch (error) {
+      console.error("Error fetching donor data:", error);
+      toast.error("Failed to load donor data");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      // Fetch donations
-      const donationsRes = await fetch(`/api/donations/donor/${address}`);
-      if (donationsRes.ok) {
-        const donationsData = await donationsRes.json();
-        setDonations(donationsData);
+  // Alternative: Fetch data using API route that gets user from session
+  const fetchDonorDataWithSession = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/donor/dashboard', {
+        credentials: 'include', // Include cookies for session
+      });
 
-        // Fetch project details for each donation
-        const projectIds = [...new Set(donationsData.map((d: Donation) => d.projectId))];
-        const projectsData = await Promise.all(
-          projectIds.map(async (projectId) => {
-            const res = await fetch(`/api/projects/${projectId}`);
-            if (res.ok) {
-              return await res.json();
-            }
-            return null;
-          })
-        );
-
-        setProjects(projectsData.filter(Boolean));
+      if (response.ok) {
+        const data = await response.json();
+        setDonations(data.donations || []);
+        setProjects(data.projects || []);
+        setStats(data.stats || { totalContributed: 0, activeProjects: 0, completedProjects: 0 });
+      } else {
+        console.error("Failed to fetch donor data");
+        toast.error("Failed to load donor data");
       }
     } catch (error) {
       console.error("Error fetching donor data:", error);
@@ -120,7 +141,11 @@ export default function DonorDashboard() {
 
   const handleDownloadReceipt = async (donationId: number) => {
     try {
-      const response = await fetch(`/api/receipts/${donationId}/pdf`);
+      const response = await fetch(`/api/receipts/${donationId}/pdf`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        }
+      });
       if (!response.ok) throw new Error("Failed to generate receipt");
 
       const blob = await response.blob();
@@ -172,20 +197,26 @@ export default function DonorDashboard() {
     return true;
   });
 
-  if (!isConnected) {
+  if (!isAuthenticated) {
     return (
       <div className="container mx-auto px-4 py-20 max-w-4xl">
         <Card className="border-2">
           <CardHeader className="text-center">
-            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
-            <CardTitle>Connect Your Wallet</CardTitle>
+            <User className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
+            <CardTitle>Authentication Required</CardTitle>
             <CardDescription>
-              Please connect your wallet to view your donor dashboard
+              Please log in to view your donor dashboard
             </CardDescription>
           </CardHeader>
           <CardContent className="text-center">
-            <p className="text-sm text-muted-foreground mb-4">
-              Use the &quot;Connect Wallet&quot; button in the navigation bar to get started
+            <Link href="/login">
+              <Button className="mt-4">Log In</Button>
+            </Link>
+            <p className="text-sm text-muted-foreground mt-4">
+              Don&apos;t have an account?{" "}
+              <Link href="/register" className="text-primary hover:underline">
+                Sign up here
+              </Link>
             </p>
           </CardContent>
         </Card>
@@ -210,10 +241,23 @@ export default function DonorDashboard() {
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Donor Dashboard</h1>
-        <p className="text-muted-foreground">
-          Track your contributions and project impact in real-time
-        </p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Welcome, {user?.name || 'Donor'}!</h1>
+            <p className="text-muted-foreground">
+              Track your contributions and project impact in real-time
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <User className="h-4 w-4" />
+            <span>{user?.email}</span>
+            {user?.role && (
+              <Badge variant="outline" className="ml-2">
+                {user.role}
+              </Badge>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Stats */}
@@ -256,183 +300,204 @@ export default function DonorDashboard() {
       <Card>
         <CardHeader>
           <CardTitle>Your Funded Projects</CardTitle>
-          <CardDescription>View milestone progress and download receipts</CardDescription>
+          <CardDescription>
+            {donations.length > 0 
+              ? `You've contributed to ${projects.length} project${projects.length !== 1 ? 's' : ''}`
+              : "You haven't donated to any projects yet"
+            }
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="all">All Projects</TabsTrigger>
-              <TabsTrigger value="active">Active</TabsTrigger>
-              <TabsTrigger value="completed">Completed</TabsTrigger>
-            </TabsList>
+          {donations.length > 0 ? (
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="mb-4">
+                <TabsTrigger value="all">All Projects</TabsTrigger>
+                <TabsTrigger value="active">Active</TabsTrigger>
+                <TabsTrigger value="completed">Completed</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value={activeTab} className="space-y-6">
-              {filteredProjects.map((project) => {
-                const myContribution = getMyContribution(project.id);
-                const myDonations = getMyDonations(project.id);
-                
-                return (
-                  <Card key={project.id} className="border-2">
-                    <CardHeader>
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                        <div className="space-y-2 flex-1">
-                          <div className="flex items-start gap-2">
-                            <CardTitle className="text-xl">{project.title}</CardTitle>
-                            {project.status === "completed" && (
-                              <Badge variant="default" className="bg-green-500">
-                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                Completed
-                              </Badge>
-                            )}
-                          </div>
-                          <CardDescription>{project.description}</CardDescription>
-                          <div className="flex flex-wrap gap-2">
-                            {project.zakatMode && (
-                              <Badge variant="secondary" className="text-xs">
-                                Zakat Eligible
-                              </Badge>
-                            )}
-                            {project.asnafTag && (
+              <TabsContent value={activeTab} className="space-y-6">
+                {filteredProjects.map((project) => {
+                  const myContribution = getMyContribution(project.id);
+                  const myDonations = getMyDonations(project.id);
+                  
+                  return (
+                    <Card key={project.id} className="border-2">
+                      <CardHeader>
+                        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                          <div className="space-y-2 flex-1">
+                            <div className="flex items-start gap-2">
+                              <CardTitle className="text-xl">{project.title}</CardTitle>
+                              {project.status === "completed" && (
+                                <Badge variant="default" className="bg-green-500">
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  Completed
+                                </Badge>
+                              )}
+                            </div>
+                            <CardDescription>{project.description}</CardDescription>
+                            <div className="flex flex-wrap gap-2">
                               <Badge variant="outline" className="text-xs">
-                                {project.asnafTag}
+                                {project.charityName || "Charity"}
                               </Badge>
-                            )}
+                              {project.zakatMode && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Zakat Eligible
+                                </Badge>
+                              )}
+                              {project.asnafTag && (
+                                <Badge variant="outline" className="text-xs">
+                                  {project.asnafTag}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right space-y-2">
+                            <div>
+                              <div className="text-2xl font-bold">
+                                ${myContribution.toLocaleString()}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Your contribution
+                              </div>
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right space-y-2">
-                          <div>
-                            <div className="text-2xl font-bold">
-                              ${myContribution.toLocaleString()}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Your contribution
-                            </div>
+                      </CardHeader>
+
+                      <CardContent className="space-y-4">
+                        {/* Funding Progress */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Funding Progress</span>
+                            <span className="font-medium">
+                              ${project.fundedBalance.toLocaleString()} / ${project.totalAmount.toLocaleString()}
+                            </span>
                           </div>
+                          <Progress 
+                            value={(project.fundedBalance / project.totalAmount) * 100} 
+                            className="h-2" 
+                          />
                         </div>
-                      </div>
-                    </CardHeader>
 
-                    <CardContent className="space-y-4">
-                      {/* Funding Progress */}
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Funding Progress</span>
-                          <span className="font-medium">
-                            ${project.fundedBalance.toLocaleString()} / ${project.totalAmount.toLocaleString()}
-                          </span>
-                        </div>
-                        <Progress 
-                          value={(project.fundedBalance / project.totalAmount) * 100} 
-                          className="h-2" 
-                        />
-                      </div>
-
-                      {/* Milestones */}
-                      {project.milestones && project.milestones.length > 0 && (
-                        <div className="space-y-3">
-                          <h4 className="text-sm font-semibold">Milestones</h4>
-                          <div className="space-y-2">
-                            {project.milestones.map((milestone) => (
-                              <div
-                                key={milestone.id}
-                                className="flex items-center justify-between p-3 rounded-lg border bg-muted/30"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div
-                                    className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${getMilestoneStatusColor(
-                                      milestone.status
-                                    )}`}
-                                  >
-                                    {getMilestoneStatusIcon(milestone.status)}
-                                  </div>
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {milestone.description}
+                        {/* Milestones */}
+                        {project.milestones && project.milestones.length > 0 && (
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-semibold">Milestones</h4>
+                            <div className="space-y-2">
+                              {project.milestones.map((milestone) => (
+                                <div
+                                  key={milestone.id}
+                                  className="flex items-center justify-between p-3 rounded-lg border bg-muted/30"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div
+                                      className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${getMilestoneStatusColor(
+                                        milestone.status
+                                      )}`}
+                                    >
+                                      {getMilestoneStatusIcon(milestone.status)}
                                     </div>
-                                    <div className="text-xs text-muted-foreground capitalize">
-                                      {milestone.status}
+                                    <div>
+                                      <div className="font-medium text-sm">
+                                        {milestone.description}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground capitalize">
+                                        {milestone.status}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="font-semibold">
+                                      ${milestone.amount.toLocaleString()}
                                     </div>
                                   </div>
                                 </div>
-                                <div className="text-right">
-                                  <div className="font-semibold">
-                                    ${milestone.amount.toLocaleString()}
-                                  </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Donation Transactions */}
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-semibold">Your Donations</h4>
+                          <div className="space-y-1">
+                            {myDonations.map((donation) => (
+                              <div key={donation.id} className="flex items-center justify-between py-2 px-3 rounded border text-sm">
+                                <div>
+                                  <span className="font-medium">${donation.amount.toLocaleString()}</span>
+                                  <span className="text-muted-foreground text-xs ml-2">
+                                    {new Date(donation.timestamp).toLocaleDateString()}
+                                  </span>
+                                </div>
+                                <div className="flex gap-2">
+                                  {isConnected && (
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      className="h-7 px-2" 
+                                      asChild
+                                    >
+                                      <a
+                                        href={`https://mumbai.polygonscan.com/tx/${donation.txHash}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    </Button>
+                                  )}
+                                  {project.zakatMode && (
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      className="h-7 px-2"
+                                      onClick={() => handleDownloadReceipt(donation.id)}
+                                    >
+                                      <Download className="h-3 w-3" />
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}
                           </div>
                         </div>
-                      )}
-
-                      {/* Actions */}
-                      <div className="flex flex-wrap gap-2 pt-2">
-                        {myDonations.map((donation) => (
-                          <Button 
-                            key={donation.id}
-                            variant="outline" 
-                            size="sm" 
-                            className="gap-2" 
-                            asChild
-                          >
-                            <a
-                              href={`https://mumbai.polygonscan.com/tx/${donation.txHash}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              <ExternalLink className="h-4 w-4" />
-                              View TX {donation.id}
-                            </a>
-                          </Button>
-                        ))}
-                        {project.zakatMode && myDonations.map((donation) => (
-                          <Button 
-                            key={`receipt-${donation.id}`}
-                            variant="outline" 
-                            size="sm" 
-                            className="gap-2"
-                            onClick={() => handleDownloadReceipt(donation.id)}
-                          >
-                            <Download className="h-4 w-4" />
-                            Receipt #{donation.id}
-                          </Button>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-
-              {filteredProjects.length === 0 && (
-                <div className="text-center py-12 text-muted-foreground">
-                  <p>No projects found in this category</p>
-                  <Link href="/projects">
-                    <Button className="mt-4">Explore Projects</Button>
-                  </Link>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </TabsContent>
+            </Tabs>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <p className="mb-4">You haven't made any donations yet</p>
+              <Link href="/projects">
+                <Button>Explore Projects to Donate</Button>
+              </Link>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Discover More Projects */}
-      <Card className="mt-8 bg-primary text-primary-foreground">
-        <CardHeader>
-          <CardTitle>Fund More Projects</CardTitle>
-          <CardDescription className="text-primary-foreground/80">
-            Discover active charity projects that need your support
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link href="/projects">
-            <Button variant="secondary" className="gap-2">
-              Browse Projects
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-          </Link>
-        </CardContent>
-      </Card>
+      {donations.length > 0 && (
+        <Card className="mt-8 bg-primary text-primary-foreground">
+          <CardHeader>
+            <CardTitle>Fund More Projects</CardTitle>
+            <CardDescription className="text-primary-foreground/80">
+              Discover active charity projects that need your support
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/projects">
+              <Button variant="secondary" className="gap-2">
+                Browse Projects
+                <ExternalLink className="h-4 w-4" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
