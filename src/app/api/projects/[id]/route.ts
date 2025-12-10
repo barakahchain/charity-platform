@@ -5,10 +5,10 @@ import { eq, and } from 'drizzle-orm';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = params.id;
+    const { id } = await params;
 
     // Validate ID
     if (!id || isNaN(parseInt(id))) {
@@ -33,6 +33,8 @@ export async function GET(
         { status: 404 }
       );
     }
+
+    console.log('Fetched project:', project[0]);
 
     // Fetch all milestones for this project
     const projectMilestones = await db

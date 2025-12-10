@@ -698,7 +698,7 @@ export default function CharityProjectCreation() {
     setIsSubmitting(true);
 
     try {
-      let currentMetadataCid: string; // Rename locally to avoid confusion
+      // let currentMetadataCid: string; // Rename locally to avoid confusion
       let hash: `0x${string}`;
 
       if (debugMode) {
@@ -753,9 +753,9 @@ export default function CharityProjectCreation() {
         };
 
         toast.info("Uploading project metadata to IPFS...");
-        currentMetadataCid = await uploadJSONToIPFS(projectMetadata);
-        setMetadataCid(currentMetadataCid); // Store in state
-        console.log("✅ Project metadata IPFS CID:", metadataCid);
+        const uploadedCid = await uploadJSONToIPFS(projectMetadata);
+        setMetadataCid(uploadedCid); // Store in state
+        console.log("✅ Project metadata IPFS CID:", uploadedCid);
 
         // ✅ CRITICAL FIX: Use the connected wallet address as charity
         // This ensures the project creator becomes the charity
@@ -767,7 +767,7 @@ export default function CharityProjectCreation() {
         console.log("Goal:", goalAmountWei.toString());
         console.log("Deadline:", deadlineTimestamp.toString());
         console.log("Deadline Enabled:", deadlineEnabled);
-        console.log("MetaCID:", metadataCid);
+        console.log("MetaCID:", uploadedCid);
         console.log(
           "Milestones:",
           milestoneAmounts.map((m) => m.toString())
@@ -787,7 +787,7 @@ export default function CharityProjectCreation() {
               builderAddress,
               goalAmountWei,
               deadlineTimestamp,
-              metadataCid,
+              uploadedCid,
               milestoneAmounts,
               deadlineEnabled,
             ],

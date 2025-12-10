@@ -124,79 +124,147 @@ export default function ProjectPage({
   const viewFunctions = getViewFunctions(PROJECT_ABI);
 
   // Create contracts configuration with proper typing
-  const contracts = viewFunctions.map((func) => ({
-    address: address as `0x${string}`,
-    abi: [func] as const, // Wrap in array and cast as const
-    functionName: func.name,
-  }));
+  // const contracts = viewFunctions.map((func) => ({
+  //   address: address as `0x${string}`,
+  //   abi: [func] as const, // Wrap in array and cast as const
+  //   functionName: func.name,
+  // }));
+
+  // Create contracts configuration with proper ABI structure
+  const contracts = [
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "goal",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "deadline",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "completed",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "charity",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "builder",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "totalDonated",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "deadlineEnabled",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "metaCid",
+    },
+  ] as const;
 
   // Fetch project data using all view functions
   const { data: projectData } = useReadContracts({
     contracts,
   });
 
-  // Update the fetchMetadataFromIPFS function to handle null/undefined
+  console.log("projectData from useReadContracts:", projectData);
+
   const fetchMetadataFromIPFS = async (
-    cid: string | null | undefined
+    cid: string
   ): Promise<ProjectMetadata | undefined> => {
-    if (!cid || cid === "null" || cid === "undefined") {
-      console.warn("No metadata CID provided");
+    if (!cid || cid.trim() === "") {
+      console.warn("Empty CID provided");
       return undefined;
     }
 
+    // Clean up the CID - remove any quotes or whitespace
+    const cleanCid = cid.trim().replace(/['"]+/g, "");
+
+    console.log("Fetching metadata with cleaned CID:", cleanCid);
+
     const gateways = [
-      `https://ipfs.io/ipfs/${cid}`,
-      `https://cloudflare-ipfs.com/ipfs/${cid}`,
-      `https://gateway.pinata.cloud/ipfs/${cid}`,
-      `https://${cid}.ipfs.dweb.link/`,
+      `https://ipfs.io/ipfs/${cleanCid}`,
+      `https://cloudflare-ipfs.com/ipfs/${cleanCid}`,
+      `https://gateway.pinata.cloud/ipfs/${cleanCid}`,
+      `https://${cleanCid}.ipfs.dweb.link/`,
     ];
 
     for (const gateway of gateways) {
       try {
-        const response = await fetch(gateway);
+        console.log(`Trying gateway: ${gateway}`);
+        const response = await fetch(gateway, {
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+        });
+
         if (response.ok) {
-          return await response.json();
+          const data = await response.json();
+          console.log(`Successfully fetched from ${gateway}:`, data);
+          return data as ProjectMetadata;
+        } else {
+          console.log(
+            `Gateway ${gateway} responded with status: ${response.status}`
+          );
         }
       } catch (error) {
+        console.log(`Gateway ${gateway} failed:`, error);
         continue;
       }
     }
 
-    console.warn(`Could not fetch metadata from any gateway for CID: ${cid}`);
+    console.warn(
+      `Could not fetch metadata from any gateway for CID: ${cleanCid}`
+    );
     return undefined;
   };
 
-  // Update the fetchProjectData function
   const fetchProjectData = async () => {
-    if (!projectData) return;
+    if (!projectData || !Array.isArray(projectData)) return;
 
     try {
-      // Create a map of function names to results
-      const resultMap: Record<string, any> = {};
-      viewFunctions.forEach((func, index) => {
-        if (projectData[index]?.status === "success") {
-          resultMap[func.name] = projectData[index].result;
-        }
-      });
+      console.log("Raw projectData array:", projectData);
 
-      // Extract values with defaults
-      const goal = resultMap.goal || BigInt(0);
-      const deadline = resultMap.deadline || BigInt(0);
-      const completed = resultMap.completed || false;
-      const charity = resultMap.charity || "";
-      const builder = resultMap.builder || "";
-      const totalDonated = resultMap.totalDonated || BigInt(0);
-      const deadlineEnabled = resultMap.deadlineEnabled || false;
-      const metaCid = resultMap.metaCid || "";
+      // Extract values with proper indexing
+      const goal = projectData[0]?.result || BigInt(0);
+      const deadline = projectData[1]?.result || BigInt(0);
+      const completed = projectData[2]?.result || false;
+      const charity = projectData[3]?.result || "";
+      const builder = projectData[4]?.result || "";
+      const totalDonated = projectData[5]?.result || BigInt(0);
+      const deadlineEnabled = projectData[6]?.result || false;
+      const metaCid = projectData[7]?.result || "";
 
-      // Fetch IPFS metadata (only if metaCid exists)
+      console.log("Extracted metaCid:", metaCid);
+      console.log("metaCid type:", typeof metaCid);
+      // console.log("metaCid length:", metaCid?.length || 0);
+
+      // Fetch IPFS metadata (only if metaCid exists and is a valid string)
       let metadata: ProjectMetadata | undefined;
-      if (metaCid && metaCid !== "null" && metaCid !== "undefined") {
+
+      if (metaCid && typeof metaCid === "string" && metaCid.trim().length > 0) {
         try {
+          console.log("Fetching metadata from IPFS for CID:", metaCid);
           metadata = await fetchMetadataFromIPFS(metaCid as string);
+          console.log("Fetched metadata:", metadata);
         } catch (error) {
           console.warn("Could not fetch metadata:", error);
         }
+      } else {
+        console.warn("metaCid is invalid or empty:", metaCid);
       }
 
       setProject({
@@ -217,6 +285,21 @@ export default function ProjectPage({
       setLoading(false);
     }
   };
+
+  // Debug effect to see the structure of projectData
+  useEffect(() => {
+    console.log("DEBUG - projectData structure:", {
+      hasData: !!projectData,
+      isArray: Array.isArray(projectData),
+      length: projectData?.length || 0,
+      items: projectData?.map((item, index) => ({
+        index,
+        status: item?.status,
+        result: item?.result,
+        error: item?.error,
+      })),
+    });
+  }, [projectData]);
 
   // Use a ref to track processed hashes to prevent multiple confirmations
   const processedHashes = useRef<Set<string>>(new Set());
@@ -530,6 +613,8 @@ export default function ProjectPage({
     fetchProjectData();
   }, [projectData, address, dataVersion]);
 
+  console.log("Project data: ", projectData);
+
   // if (!isConnected) {
   //   return (
   //     <div className="container mx-auto px-4 py-20 max-w-6xl">
@@ -593,6 +678,8 @@ export default function ProjectPage({
     project.totalDonated,
     project.goal
   );
+
+  console.log("Rendering project:", project);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">

@@ -26,20 +26,11 @@ import {
   PlusCircle,
   TrendingUp,
   AlertCircle,
+  Clock,
 } from "lucide-react";
 
-interface Project {
-  id: number;
-  title: string;
-  description: string;
-  totalAmount: number;
-  fundedBalance: number;
-  status: string;
-  createdAt: string;
-  contractTemplate: string;
-  zakatMode: boolean;
-  asnafTag: string | null;
-}
+// Import the shared type from your schema
+import { Project } from "@/db/types";
 
 export default function CharityProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -50,16 +41,15 @@ export default function CharityProjectsPage() {
   const user = useUser();
 
   useEffect(() => {
-    if (!user) return; // Don't fetch if no user
+    if (!user) return;
 
     async function loadProjects() {
       try {
         setLoading(true);
         setError(null);
 
-        // Fetch projects WITH credentials to include cookies
         const projectsRes = await fetch(`/api/projects`, {
-          credentials: "include", // This is crucial!
+          credentials: "include",
         });
         const projectsData = await projectsRes.json();
 
@@ -77,7 +67,7 @@ export default function CharityProjectsPage() {
     }
 
     loadProjects();
-  }, [user]); // Only fetch when user changes
+  }, [user]);
 
   // Helper functions
   const formatAmount = (amount: number) => {
@@ -87,7 +77,8 @@ export default function CharityProjectsPage() {
     });
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return "Not set";
     return new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
@@ -114,7 +105,7 @@ export default function CharityProjectsPage() {
   };
 
   const getContractTemplateBadge = (template: string) => {
-    const templates: { [key: string]: string } = {
+    const templates: Record<string, string> = {
       Wakālah: "Wakālah",
       Juʿālah: "Juʿālah",
       Istisnāʿ: "Istisnāʿ",
@@ -134,7 +125,16 @@ export default function CharityProjectsPage() {
     return Math.round(totalProgress / projects.length);
   };
 
-  // Wrap everything in ProtectedPage
+  // Calculate days remaining for deadline
+  const getDaysRemaining = (deadline: string | null) => {
+    if (!deadline) return null;
+    const today = new Date();
+    const deadlineDate = new Date(deadline);
+    const diffTime = deadlineDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
   return (
     <ProtectedPage allowedRoles={["charity", "admin"]}>
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -232,7 +232,7 @@ export default function CharityProjectsPage() {
           </Card>
         ) : (
           <>
-            {/* Stats Summary - Only show if we have projects */}
+            {/* Stats Summary */}
             {projects.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <Card>
@@ -313,134 +313,160 @@ export default function CharityProjectsPage() {
 
             {/* Projects Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projects.map((project) => (
-                <Card
-                  key={project.id}
-                  className="hover:shadow-lg transition-shadow duration-200 border bg-white"
-                >
-                  <CardHeader className="pb-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <CardTitle className="text-lg line-clamp-2 leading-tight">
-                        {project.title}
-                      </CardTitle>
-                      {getStatusBadge(project.status)}
-                    </div>
-
-                    <CardDescription className="line-clamp-3 text-sm text-gray-400">
-                      {project.description}
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="space-y-4 pt-0">
-                    {/* Progress Bar */}
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          Funded: ${formatAmount(project.fundedBalance)} USDC
-                        </span>
-                        <span className="font-semibold">
-                          Goal: ${formatAmount(project.totalAmount)} USDC
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-800 rounded-full h-2">
-                        <div
-                          className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                          style={{
-                            width: `${getProgressPercentage(project.fundedBalance, project.totalAmount)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <Separator className="bg-gray-700" />
-
-                    {/* Project Details */}
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <Calendar className="h-4 w-4" />
-                          Created:
-                        </span>
-                        <span className="font-semibold text-right">
-                          {formatDate(project.createdAt)}
-                        </span>
+              {projects.map((project) => {
+                const daysRemaining = project.deadlineEnabled && project.deadline 
+                  ? getDaysRemaining(project.deadline)
+                  : null;
+                
+                return (
+                  <Card
+                    key={project.id}
+                    className="hover:shadow-lg transition-shadow duration-200 border bg-white"
+                  >
+                    <CardHeader className="pb-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <CardTitle className="text-lg line-clamp-2 leading-tight">
+                          {project.title}
+                        </CardTitle>
+                        {getStatusBadge(project.status)}
                       </div>
 
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <FileText className="h-4 w-4" />
-                          Contract:
-                        </span>
-                        <Badge variant="outline" className="text-xs bg-white">
-                          {getContractTemplateBadge(project.contractTemplate)}
-                        </Badge>
-                      </div>
+                      <CardDescription className="line-clamp-3 text-sm text-gray-400">
+                        {project.description}
+                      </CardDescription>
+                    </CardHeader>
 
-                      {project.asnafTag && (
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-2 text-muted-foreground">
-                            <Users className="h-4 w-4" />
-                            Asnaf Category:
+                    <CardContent className="space-y-4 pt-0">
+                      {/* Progress Bar */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Funded: ${formatAmount(project.fundedBalance)} USDC
                           </span>
-                          <span className="text-xs font-medium text-right">
-                            {project.asnafTag}
+                          <span className="font-semibold">
+                            Goal: ${formatAmount(project.totalAmount)} USDC
                           </span>
                         </div>
-                      )}
-
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <Wallet className="h-4 w-4" />
-                          Zakat Mode:
-                        </span>
-                        <Badge
-                          variant="outline"
-                          className={`text-xs ${project.zakatMode ? "bg-white text-green-400" : "bg-white"}`}
-                        >
-                          {project.zakatMode ? "Enabled" : "Disabled"}
-                        </Badge>
+                        <div className="w-full bg-gray-800 rounded-full h-2">
+                          <div
+                            className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                            style={{
+                              width: `${getProgressPercentage(
+                                project.fundedBalance,
+                                project.totalAmount
+                              )}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                    </div>
 
-                    <Separator className="bg-gray-700" />
+                      <Separator className="bg-gray-700" />
 
-                    {/* Action Buttons */}
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 gap-2 border-gray-700 hover:bg-gray-300"
-                        onClick={() =>
-                          window.open(
-                            `/charity/projects/${project.id}`,
-                            "_blank"
-                          )
-                        }
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                        Details
-                      </Button>
-                      <Link
-                        href={`/charity/projects/${project.id}`}
-                        className="flex-1"
-                      >
+                      {/* Project Details */}
+                      <div className="space-y-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-2 text-muted-foreground">
+                            <Calendar className="h-4 w-4" />
+                            Created:
+                          </span>
+                          <span className="font-semibold text-right">
+                            {formatDate(project.createdAt)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-2 text-muted-foreground">
+                            <FileText className="h-4 w-4" />
+                            Contract:
+                          </span>
+                          <Badge variant="outline" className="text-xs bg-white">
+                            {getContractTemplateBadge(project.contractTemplate)}
+                          </Badge>
+                        </div>
+
+                        {project.asnafTag && (
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-2 text-muted-foreground">
+                              <Users className="h-4 w-4" />
+                              Asnaf Category:
+                            </span>
+                            <span className="text-xs font-medium text-right">
+                              {project.asnafTag}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-2 text-muted-foreground">
+                            <Wallet className="h-4 w-4" />
+                            Zakat Mode:
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={`text-xs ${project.zakatMode ? "bg-white text-green-400" : "bg-white"}`}
+                          >
+                            {project.zakatMode ? "Enabled" : "Disabled"}
+                          </Badge>
+                        </div>
+
+                        {/* Show deadline if enabled */}
+                        {project.deadlineEnabled && project.deadline && daysRemaining !== null && (
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-2 text-muted-foreground">
+                              <Clock className="h-4 w-4" />
+                              Deadline:
+                            </span>
+                            <span className={`text-xs font-medium text-right ${
+                              daysRemaining <= 0 ? "text-red-500" :
+                              daysRemaining <= 7 ? "text-yellow-500" :
+                              "text-green-500"
+                            }`}>
+                              {daysRemaining <= 0 ? "Expired" : `${daysRemaining} days left`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <Separator className="bg-gray-700" />
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
                         <Button
+                          variant="outline"
                           size="sm"
-                          className="w-full gap-2 bg-gray-500 hover:bg-gray-700"
+                          className="flex-1 gap-2 border-gray-700 hover:bg-gray-300"
+                          onClick={() =>
+                            window.open(
+                              `/projects/${project.contractAddress || project.id}`,
+                              "_blank"
+                            )
+                          }
                         >
-                          <CheckCircle2 className="h-4 w-4" />
-                          Manage Project
+                          <ExternalLink className="h-4 w-4" />
+                          Details
                         </Button>
-                      </Link>
-                    </div>
+                        <Link
+                          href={`/projects/${project.contractAddress}`}
+                          className="flex-1"
+                        >
+                          <Button
+                            size="sm"
+                            className="w-full gap-2 bg-gray-500 hover:bg-gray-700"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            View Project
+                          </Button>
+                        </Link>
+                      </div>
 
-                    {/* Project ID */}
-                    <div className="text-xs text-muted-foreground font-mono text-center pt-2 border-t border-gray-800">
-                      ID: {project.id}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                      {/* Project ID */}
+                      <div className="text-xs text-muted-foreground font-mono text-center pt-2 border-t border-gray-800">
+                        ID: {project.id}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
 
             {/* Create New Project Link */}
