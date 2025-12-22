@@ -5,11 +5,11 @@ import * as dotenv from "dotenv";
 // import ProjectFactoryAbi from "../artifacts/contracts/ProjectFactory.sol/ProjectFactory.json" assert { type: "json" };
 import ProjectFactoryAbi from "../src/lib/abis/ProjectFactory.json" assert { type: "json" };
 
-dotenv.config();
+dotenv.config({ path: ".env.local" });
 
 async function main() {
   // ---- Setup ----
-  const factoryAddress = "0x66104d4a199df29f829af78cc9280505aeae302c"; // Replace with your deployed ProjectFactory
+  const factoryAddress = process.env.FACTORY_CONTRACT_ADDRESS; // Replace with your deployed ProjectFactory
   const account = privateKeyToAccount(`0x${process.env.PRIVATE_KEY}`);
 
   const publicClient = createPublicClient({
@@ -30,6 +30,7 @@ async function main() {
   const deadline = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60; // 7 days
   const metaCid = "bafy...";
   const milestoneAmounts = [parseEther("3"), parseEther("3"), parseEther("4")];
+  const deadlineEnabled = false; 
 
   console.log("Creating project...");
 
@@ -38,11 +39,13 @@ async function main() {
     address: factoryAddress as `0x${string}`,
     abi: ProjectFactoryAbi.abi,
     functionName: "createProject",
-    args: [charity, builder, goal, deadline, metaCid, milestoneAmounts],
+    args: [charity, builder, goal, deadline, metaCid, milestoneAmounts, deadlineEnabled],
   });
 
   console.log("⏳ Waiting for confirmation...");
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient.waitForTransactionReceipt({
+    hash: txHash,
+  });
 
   // ---- Extract project address from logs ----
   const log = receipt.logs.find((log) =>

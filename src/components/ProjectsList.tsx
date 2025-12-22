@@ -279,8 +279,8 @@ export default function ProjectsList() {
         console.log(
           `Found ${missingAddresses.length} projects on-chain that aren't in DB`
         );
-        console.log('missingAddresses:', missingAddresses);
-        console.log( 'dbOnlyProjects', dbOnlyProjects);
+        console.log("missingAddresses:", missingAddresses);
+        console.log("dbOnlyProjects", dbOnlyProjects);
       }
     }
   }, [projectAddresses, dbOnlyProjects]);
@@ -811,10 +811,13 @@ export default function ProjectsList() {
                     <Link
                       href={`/projects/${project.address}`}
                       className="flex-1"
+                      target="_blank"
                     >
                       <Button size="sm" className="w-full gap-2">
+                        
                         <CheckCircle2 className="h-4 w-4" />
                         View Project
+                        <ExternalLink className="h-4 w-4" />
                       </Button>
                     </Link>
                   </div>

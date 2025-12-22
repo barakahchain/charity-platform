@@ -36,6 +36,8 @@ import {
   Clock,
   HandCoins,
   ArrowLeft,
+  Check,
+  X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,9 +45,8 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useUser } from "@/app/stores/auth-store";
-import { abi as ProjectAbi } from "@/lib/abis/Project.json";
+import ProjectAbi from "@/lib/abis/Project.json";
 
-// Reuse your existing interfaces
 interface ProjectMetadata {
   title: string;
   description: string;
@@ -61,6 +62,11 @@ interface ProjectMetadata {
   createdBy: string;
 }
 
+interface ContractMilestone {
+  amount: bigint;
+  released: boolean;
+}
+
 interface ProjectData {
   address: string;
   goal: bigint;
@@ -71,84 +77,18 @@ interface ProjectData {
   totalDonated: bigint;
   deadlineEnabled: boolean;
   metadata?: ProjectMetadata;
+  contractMilestones: ContractMilestone[]; // NEW: Milestones from contract
 }
 
-// Project ABI - Add donate function
-const PROJECT_ABI = [
-  {
-    name: "goal",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    name: "deadline",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    name: "completed",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    name: "charity",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    name: "builder",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-    stateMutability: "view",
-  },
-  {
-    name: "totalDonated",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    name: "deadlineEnabled",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    name: "metaCid",
-    type: "function",
-    inputs: [],
-    outputs: [{ name: "", type: "string" }],
-    stateMutability: "view",
-  },
-  {
-    name: "donate",
-    type: "function",
-    inputs: [],
-    stateMutability: "payable",
-    outputs: [],
-  },
-] as const;
+const PROJECT_ABI = ProjectAbi.abi;
 
 export default function ProjectPage({
   params,
 }: {
   params: Promise<{ address: string }>;
 }) {
-  // Unwrap the params promise
   const { address } = React.use(params);
   const router = useRouter();
-  // Get user from Zustand
   const user = useUser();
 
   const { isConnected } = useAccount();
@@ -159,6 +99,7 @@ export default function ProjectPage({
   const [loading, setLoading] = useState(true);
   const [donationAmount, setDonationAmount] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
+  const [contractMilestones, setContractMilestones] = useState<ContractMilestone[]>([]); // NEW: Contract milestones state
 
   const [donationHash, setDonationHash] = useState<string | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -174,82 +115,222 @@ export default function ProjectPage({
     hash: string;
   } | null>(null);
 
-  // Fetch project data
-  const { data: projectData } = useReadContracts({
-    contracts: PROJECT_ABI.map((abiItem) => ({
+  // Create contracts configuration for basic project data
+  const contracts = [
+    {
       address: address as `0x${string}`,
       abi: PROJECT_ABI,
-      functionName: abiItem.name,
-    })),
+      functionName: "goal",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "deadline",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "completed",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "charity",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "builder",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "totalDonated",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "deadlineEnabled",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "metaCid",
+    },
+    {
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "milestoneCount",
+    },
+  ] as const;
+
+  // NEW: Separate read contract for milestones
+  const { data: milestoneCount } = useReadContracts({
+    contracts: [{
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI,
+      functionName: "milestoneCount",
+    }],
   });
 
-  // Update the fetchMetadataFromIPFS function to handle null/undefined
+  // Fetch project data using all view functions
+  const { data: projectData } = useReadContracts({
+    contracts,
+  });
+
+  console.log("projectData from useReadContracts:", projectData);
+  console.log("milestoneCount data:", milestoneCount);
+
+  // NEW: Function to fetch milestones from contract
+  // Instead of O(n) calls
+const fetchContractMilestones = async (count: number): Promise<ContractMilestone[]> => {
+  if (count <= 0) return [];
+  
+  const { createPublicClient, http } = await import("viem");
+  const { polygonAmoy } = await import("viem/chains");
+  
+  const publicClient = createPublicClient({
+    chain: polygonAmoy,
+    transport: http("https://rpc-amoy.polygon.technology"),
+  });
+  
+  try {
+    // Use a helper function to create properly typed contract calls
+    const contracts = Array.from({ length: count }, (_, i) => ({
+      address: address as `0x${string}`,
+      abi: PROJECT_ABI.filter((item: any) => 
+        item.type === "function" && item.name === "getMilestone"
+      ),
+      functionName: "getMilestone" as const,
+      args: [BigInt(i)] as const,
+    }));
+    
+    const results = await publicClient.multicall({
+      contracts: contracts as any, // Type assertion as last resort
+    });
+    
+    return results.map((result: any) => {
+      if (result.status === "success" && result.result) {
+        const res = result.result as [bigint, boolean];
+        return {
+          amount: res[0],
+          released: res[1],
+        };
+      }
+      return { amount: BigInt(0), released: false };
+    });
+  } catch (error) {
+    console.error("Multicall error:", error);
+    return [];
+  }
+};
+
   const fetchMetadataFromIPFS = async (
-    cid: string | null | undefined
+    cid: string
   ): Promise<ProjectMetadata | undefined> => {
-    if (!cid || cid === "null" || cid === "undefined") {
-      console.warn("No metadata CID provided");
+    if (!cid || cid.trim() === "") {
+      console.warn("Empty CID provided");
       return undefined;
     }
 
+    const cleanCid = cid.trim().replace(/['"]+/g, "");
+    console.log("Fetching metadata with cleaned CID:", cleanCid);
+
     const gateways = [
-      `https://ipfs.io/ipfs/${cid}`,
-      `https://cloudflare-ipfs.com/ipfs/${cid}`,
-      `https://gateway.pinata.cloud/ipfs/${cid}`,
-      `https://${cid}.ipfs.dweb.link/`,
+      `https://ipfs.io/ipfs/${cleanCid}`,
+      `https://cloudflare-ipfs.com/ipfs/${cleanCid}`,
+      `https://gateway.pinata.cloud/ipfs/${cleanCid}`,
+      `https://${cleanCid}.ipfs.dweb.link/`,
     ];
 
     for (const gateway of gateways) {
       try {
-        const response = await fetch(gateway);
+        console.log(`Trying gateway: ${gateway}`);
+        const response = await fetch(gateway, {
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+        });
+
         if (response.ok) {
-          return await response.json();
+          const data = await response.json();
+          console.log(`Successfully fetched from ${gateway}:`, data);
+          return data as ProjectMetadata;
+        } else {
+          console.log(
+            `Gateway ${gateway} responded with status: ${response.status}`
+          );
         }
       } catch (error) {
+        console.log(`Gateway ${gateway} failed:`, error);
         continue;
       }
     }
 
-    console.warn(`Could not fetch metadata from any gateway for CID: ${cid}`);
+    console.warn(
+      `Could not fetch metadata from any gateway for CID: ${cleanCid}`
+    );
     return undefined;
   };
 
-  // Update the fetchProjectData function
   const fetchProjectData = async () => {
-    if (!projectData) return;
+    if (!projectData || !Array.isArray(projectData)) return;
 
     try {
-      const [
-        goal,
-        deadline,
-        completed,
-        charity,
-        builder,
-        totalDonated,
-        deadlineEnabled,
-        metaCid,
-      ] = projectData.map((item) => item.result);
+      console.log("Raw projectData array:", projectData);
 
-      // Fetch IPFS metadata (only if metaCid exists)
-      let metadata: ProjectMetadata | undefined;
-      if (metaCid && metaCid !== "null" && metaCid !== "undefined") {
+      // Extract values with proper indexing
+      const goal = projectData[0]?.result || BigInt(0);
+      const deadline = projectData[1]?.result || BigInt(0);
+      const completed = projectData[2]?.result || false;
+      const charity = projectData[3]?.result || "";
+      const builder = projectData[4]?.result || "";
+      const totalDonated = projectData[5]?.result || BigInt(0);
+      const deadlineEnabled = projectData[6]?.result || false;
+      const metaCid = projectData[7]?.result || "";
+      const milestoneCount = projectData[8]?.result ? Number(projectData[8].result as bigint) : 0;
+
+      console.log("Extracted metaCid:", metaCid);
+      console.log("metaCid type:", typeof metaCid);
+      console.log("Milestone count from contract:", milestoneCount);
+
+      // NEW: Fetch milestones from contract
+      let contractMilestones: ContractMilestone[] = [];
+      if (milestoneCount > 0) {
         try {
+          contractMilestones = await fetchContractMilestones(milestoneCount);
+          console.log("Fetched contract milestones:", contractMilestones);
+        } catch (error) {
+          console.warn("Failed to fetch contract milestones:", error);
+        }
+      }
+
+      // Fetch IPFS metadata
+      let metadata: ProjectMetadata | undefined;
+      if (metaCid && typeof metaCid === "string" && metaCid.trim().length > 0) {
+        try {
+          console.log("Fetching metadata from IPFS for CID:", metaCid);
           metadata = await fetchMetadataFromIPFS(metaCid as string);
+          console.log("Fetched metadata:", metadata);
         } catch (error) {
           console.warn("Could not fetch metadata:", error);
         }
+      } else {
+        console.warn("metaCid is invalid or empty:", metaCid);
       }
 
       setProject({
         address: address,
-        goal: (goal as bigint) || BigInt(0),
-        deadline: (deadline as bigint) || BigInt(0),
-        completed: (completed as boolean) || false,
-        charity: (charity as string) || "",
-        builder: (builder as string) || "",
-        totalDonated: (totalDonated as bigint) || BigInt(0),
-        deadlineEnabled: (deadlineEnabled as boolean) || false,
+        goal: goal as bigint,
+        deadline: deadline as bigint,
+        completed: completed as boolean,
+        charity: charity as string,
+        builder: builder as string,
+        totalDonated: totalDonated as bigint,
+        deadlineEnabled: deadlineEnabled as boolean,
         metadata,
+        contractMilestones, // NEW: Include contract milestones
       });
     } catch (error) {
       console.error("Error processing project data:", error);
@@ -259,19 +340,32 @@ export default function ProjectPage({
     }
   };
 
+  // Debug effect to see the structure of projectData
+  useEffect(() => {
+    console.log("DEBUG - projectData structure:", {
+      hasData: !!projectData,
+      isArray: Array.isArray(projectData),
+      length: projectData?.length || 0,
+      items: projectData?.map((item, index) => ({
+        index,
+        status: item?.status,
+        result: item?.result,
+        error: item?.error,
+      })),
+    });
+  }, [projectData]);
+
   // Use a ref to track processed hashes to prevent multiple confirmations
   const processedHashes = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const waitForConfirmation = async () => {
       if (donationHash && !isConfirmed && !isConfirming && !confirmationError) {
-        // Check if we've already processed this hash
         if (processedHashes.current.has(donationHash)) {
           console.log("Already processed this donation hash, skipping");
           return;
         }
 
-        // Mark this hash as being processed
         processedHashes.current.add(donationHash);
         setIsConfirming(true);
         setConfirmationError(null);
@@ -292,7 +386,6 @@ export default function ProjectPage({
           setIsConfirmed(true);
 
           if (receipt.status === "success") {
-            // Save to database with user ID
             const saveResult = await saveDonationToDB(
               donationHash,
               donationAmount,
@@ -300,7 +393,6 @@ export default function ProjectPage({
             );
 
             if (saveResult.success) {
-              // Show success popup instead of immediate reload
               setSuccessData({
                 amount: donationAmount,
                 hash: donationHash,
@@ -318,7 +410,6 @@ export default function ProjectPage({
               toast.warning(
                 "✅ Donation confirmed on chain, but could not save record to database."
               );
-              // Still show success popup
               setSuccessData({
                 amount: donationAmount,
                 hash: donationHash,
@@ -345,14 +436,12 @@ export default function ProjectPage({
             errorMessage = "Donation not found. It may have been dropped.";
             toast.error(errorMessage);
           } else {
-            // For other errors, assume the transaction might still be successful
             console.log("Assuming donation might be successful despite errors");
             shouldContinue = true;
             toast.success(
               "Donation submitted! Check your wallet for confirmation."
             );
             setIsConfirmed(true);
-            // Try to save anyway (it will handle duplicates)
             await saveDonationToDB(donationHash, donationAmount);
           }
 
@@ -368,7 +457,6 @@ export default function ProjectPage({
         } finally {
           setIsConfirming(false);
           setDonationHash(null);
-          // Note: We keep the hash in processedHashes to prevent re-processing
         }
       }
     };
@@ -391,26 +479,22 @@ export default function ProjectPage({
     blockNumber?: number
   ) => {
     try {
-      // Get the JWT token - check if using localStorage or cookies
       let token: string | null = null;
 
-      // Try to get from localStorage
       if (typeof window !== "undefined") {
         token =
           localStorage.getItem("token") || localStorage.getItem("auth-token");
       }
 
-      // If no token in localStorage, check cookies
       if (!token && typeof document !== "undefined") {
         const cookieMatch = document.cookie.match(/token=([^;]+)/);
         token = cookieMatch ? cookieMatch[1] : null;
       }
 
-      // Include donorId from the logged-in user
       const requestBody = {
         projectAddress: address,
-        donorId: user?.id, // Use the logged-in user's ID
-        donorWalletAddress, // Still include wallet address for reference
+        donorId: user?.id,
+        donorWalletAddress,
         amount: parseFloat(amount),
         txHash,
         blockNumber,
@@ -425,7 +509,6 @@ export default function ProjectPage({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Only add Authorization header if we have a token
           ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify(requestBody),
@@ -436,7 +519,6 @@ export default function ProjectPage({
       if (response.ok) {
         console.log("✅ Donation recorded in database:", result);
 
-        // Check if it was a duplicate
         if (response.status === 200 && result.warning) {
           console.log("⚠️ Donation was already recorded previously");
           return { success: true, wasDuplicate: true };
@@ -453,18 +535,14 @@ export default function ProjectPage({
     }
   };
 
-  // Update the donation button to check for user
   const handleDonate = async () => {
     if (!isConnected) {
       toast.error("Please connect your wallet first");
       return;
     }
 
-    // Check if user is logged in
     if (!user) {
       toast.error("Please log in to make a donation");
-      // Optionally redirect to login
-      // router.push('/login');
       return;
     }
 
@@ -478,7 +556,6 @@ export default function ProjectPage({
       return;
     }
 
-    // Check if project is still active
     if (project.completed) {
       toast.error(
         "This project has been completed and no longer accepts donations"
@@ -496,7 +573,6 @@ export default function ProjectPage({
       return;
     }
 
-    // Reset confirmation state
     setIsConfirmed(false);
     setConfirmationError(null);
 
@@ -513,7 +589,7 @@ export default function ProjectPage({
         {
           onSuccess: (hash) => {
             toast.success("Donation submitted! Waiting for confirmation...");
-            setDonationHash(hash); // This will trigger the useEffect
+            setDonationHash(hash);
           },
           onError: (error) => {
             toast.error(`Donation failed: ${error.message}`);
@@ -571,21 +647,7 @@ export default function ProjectPage({
     fetchProjectData();
   }, [projectData, address, dataVersion]);
 
-  // if (!isConnected) {
-  //   return (
-  //     <div className="container mx-auto px-4 py-20 max-w-6xl">
-  //       <Card className="border-2">
-  //         <CardHeader className="text-center">
-  //           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-yellow-500" />
-  //           <CardTitle>Connect Your Wallet</CardTitle>
-  //           <CardDescription>
-  //             Please connect your wallet to view project details
-  //           </CardDescription>
-  //         </CardHeader>
-  //       </Card>
-  //     </div>
-  //   );
-  // }
+  console.log("Project data: ", projectData);
 
   if (loading) {
     return (
@@ -634,6 +696,8 @@ export default function ProjectPage({
     project.totalDonated,
     project.goal
   );
+
+  console.log("Rendering project:", project);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -736,7 +800,7 @@ export default function ProjectPage({
                 project.completed ||
                 (project.deadlineEnabled &&
                   Number(project.deadline) * 1000 < Date.now()) ||
-                showSuccessPopup // Disable while showing success popup
+                showSuccessPopup
               }
             >
               {isDonating || isConfirming ? (
@@ -872,27 +936,56 @@ export default function ProjectPage({
                 <CardTitle>Project Milestones</CardTitle>
                 <CardDescription>
                   Breakdown of project phases and funding allocation
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    <Badge variant="outline" className="mr-2">
+                      From Contract
+                    </Badge>
+                    Real-time milestone status from blockchain
+                  </div>
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {project.metadata?.milestones &&
-                project.metadata.milestones.length > 0 ? (
+                {project.contractMilestones && project.contractMilestones.length > 0 ? (
                   <div className="space-y-4">
-                    {project.metadata.milestones.map((milestone, index) => (
+                    {project.contractMilestones.map((milestone, index) => (
                       <div key={index} className="border rounded-lg p-4">
                         <div className="flex items-start justify-between mb-2">
-                          <h4 className="font-semibold">
-                            Milestone {index + 1}
-                          </h4>
-                          <Badge variant="outline">
-                            {parseFloat(milestone.amount).toFixed(2)} MATIC
-                          </Badge>
+                          <div>
+                            <h4 className="font-semibold">
+                              Milestone {index + 1}
+                            </h4>
+                            {project.metadata?.milestones?.[index]?.description && (
+                              <p className="text-muted-foreground text-sm mt-1">
+                                {project.metadata.milestones[index].description}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">
+                              {formatAmount(milestone.amount)} MATIC
+                            </Badge>
+                            <Badge
+                              variant={milestone.released ? "default" : "outline"}
+                              className={
+                                milestone.released
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-yellow-100 text-yellow-800"
+                              }
+                            >
+                              {milestone.released ? (
+                                <Check className="h-3 w-3 mr-1" />
+                              ) : (
+                                <X className="h-3 w-3 mr-1" />
+                              )}
+                              {milestone.released ? "Released" : "Pending"}
+                            </Badge>
+                          </div>
                         </div>
-                        <p className="text-muted-foreground text-sm">
-                          {milestone.description}
-                        </p>
                         <div className="mt-2 text-xs text-muted-foreground">
-                          Beneficiary: {milestone.beneficiaryAddress}
+                          <div className="flex justify-between">
+                            <span>Beneficiary: {project.builder}</span>
+                            <span>Status: {milestone.released ? "Paid" : "Awaiting release"}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1073,7 +1166,6 @@ export default function ProjectPage({
                   onClick={() => {
                     setShowSuccessPopup(false);
                     setSuccessData(null);
-                    // Reload the page after closing popup
                     window.location.reload();
                   }}
                 >

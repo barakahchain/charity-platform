@@ -20,7 +20,7 @@ interface StateVariable {
 
 async function main() {
   // ---- Setup ----
-  const projectAddress = "0x8Ba08b1C3C1Def16880618F3919b1852B5Fa10F8"; // Replace with your Project contract address
+  const projectAddress = "0x9242D906098a5C2d1EC779bcE5b330C3cF6fb57E"; // Replace with your Project contract address
   const projectABI = ProjectABI.abi as ABIFunction[];
 
   const publicClient = createPublicClient({

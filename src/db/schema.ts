@@ -66,6 +66,7 @@ export const milestones = sqliteTable("milestones", {
   projectId: integer("project_id")
     .notNull()
     .references(() => projects.id),
+  orderIndex: integer("order_index").notNull().default(0), 
   description: text("description").notNull(),
   amount: real("amount").notNull(),
   beneficiaryAddress: text("beneficiary_address").notNull(),

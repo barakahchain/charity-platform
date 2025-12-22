@@ -1,17 +1,11 @@
 // app/api/projects/create/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import {
-  projects,
-  users,
-  userWallets,
-  walletEvents,
-  milestones,
-} from "@/db/schema";
+import { projects, users, userWallets, walletEvents } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 
-// Extended validation schema with milestones
+// Validation schema
 const CreateProjectSchema = z.object({
   contractAddress: z.string().min(1, "Contract address is required"),
   metadataCid: z.string().min(1, "Metadata CID is required"),
@@ -25,35 +19,22 @@ const CreateProjectSchema = z.object({
   status: z.enum(["active", "completed", "paused"]).default("active"),
   blockchainTxHash: z.string().optional().nullable(),
   charityAddress: z.string().min(1, "Charity address is required"),
-  deadline: z.string().optional().nullable(),
-  deadlineEnabled: z.boolean().default(false),
-  // NEW: Milestones array from metadata
-  milestones: z
-    .array(
-      z.object({
-        description: z.string().min(1, "Milestone description is required"),
-        amount: z.number().positive("Milestone amount must be positive"),
-        beneficiaryAddress: z
-          .string()
-          .regex(/^0x[a-fA-F0-9]{40}$/, "Invalid Ethereum address"),
-      })
-    )
-    .min(1, "At least one milestone is required"),
+  deadline: z.string().optional().nullable(), // Add deadline field
+  deadlineEnabled: z.boolean().default(false), // Add deadlineEnabled field
 });
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("Creating new project with milestones...");
+    console.log("Creating new project...");
     const body = await request.json();
 
     // Validate input
     const validationResult = CreateProjectSchema.safeParse(body);
     if (!validationResult.success) {
-      console.error("Validation error:", validationResult.error.issues);
       return NextResponse.json(
         {
           error: "Invalid input",
-          details: validationResult.error.issues,
+          details: validationResult.error.issues, // use .issues from ZodError to return validation problems
         },
         { status: 400 }
       );
@@ -74,7 +55,6 @@ export async function POST(request: NextRequest) {
       charityAddress,
       deadline,
       deadlineEnabled,
-      milestones: projectMilestones, // Renamed to avoid conflict with table name
     } = validationResult.data;
 
     // Validate deadline if enabled
@@ -91,6 +71,7 @@ export async function POST(request: NextRequest) {
     if (deadlineEnabled && deadline) {
       const deadlineDate = new Date(deadline);
       const now = new Date();
+
       if (deadlineDate <= now) {
         return NextResponse.json(
           {
@@ -101,9 +82,7 @@ export async function POST(request: NextRequest) {
         );
       }
     }
-
     console.log("Input validated successfully.");
-
     // Check if project already exists with this contract address
     const existingProject = await db
       .select()
@@ -118,7 +97,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find charity user by wallet address
+    // Find charity user by wallet address through userWallets table
     const charityWallet = await db
       .select({
         userId: userWallets.userId,
@@ -138,14 +117,16 @@ export async function POST(request: NextRequest) {
       )
       .limit(1);
 
-    console.log("Charity address:", charityAddress);
+    console.log("charityAddress:", charityAddress);
+
     console.log("Charity wallet lookup result:", charityWallet);
 
     if (charityWallet.length === 0) {
       return NextResponse.json(
         {
           error: "Charity wallet not found or inactive",
-          message: "No active wallet found with this address",
+          message:
+            "No active wallet found with this address. Please ensure the wallet is connected and active.",
         },
         { status: 404 }
       );
@@ -169,88 +150,47 @@ export async function POST(request: NextRequest) {
     const formattedDeadline =
       deadlineEnabled && deadline ? new Date(deadline).toISOString() : null;
 
-    // ⚠️ CRITICAL: Use transaction for atomic operations
-    let newProject: any;
-    try {
-      await db.transaction(async (tx) => {
-        // 1. Create project in database
-        const [projectResult] = await tx
-          .insert(projects)
-          .values({
-            charityId,
-            walletAddress: charityAddress,
-            title,
-            description,
-            metaCid: metadataCid,
-            zakatMode,
-            asnafTag: zakatMode ? asnafTag : null,
-            contractTemplate,
-            totalAmount,
-            fundedBalance,
-            status,
-            blockchainTxHash,
-            contractAddress,
-            deadline: formattedDeadline,
-            deadlineEnabled,
-            createdAt: new Date().toISOString(),
-          })
-          .returning();
+    // Create project in database
+    const [newProject] = await db
+      .insert(projects)
+      .values({
+        charityId,
+        walletAddress: charityAddress,
+        title,
+        description,
+        metaCid: metadataCid,
+        zakatMode,
+        asnafTag: zakatMode ? asnafTag : null,
+        contractTemplate,
+        totalAmount,
+        fundedBalance,
+        status,
+        blockchainTxHash,
+        contractAddress,
+        deadline: formattedDeadline,
+        deadlineEnabled,
+        createdAt: new Date().toISOString(),
+      })
+      .returning();
 
-        newProject = projectResult;
-        console.log("Project created with ID:", newProject.id);
-
-        // 2. Create milestones for the project
-        if (projectMilestones && projectMilestones.length > 0) {
-          const milestonePromises = projectMilestones.map(
-            (milestone, index) => {
-              return tx.insert(milestones).values({
-                projectId: newProject.id,
-                description: milestone.description,
-                amount: milestone.amount,
-                beneficiaryAddress: milestone.beneficiaryAddress,
-                status: "pending",
-                createdAt: new Date().toISOString(),
-              });
-            }
-          );
-
-          await Promise.all(milestonePromises);
-          console.log(
-            `Created ${projectMilestones.length} milestones for project ${newProject.id}`
-          );
-        }
-
-        // 3. Log the project creation event
-        await tx.insert(walletEvents).values({
-          userWalletId: userWalletId,
-          eventType: "project_created",
-          metadata: JSON.stringify({
-            projectId: newProject.id,
-            projectTitle: title,
-            contractAddress,
-            totalAmount,
-            charityAddress,
-            deadline: formattedDeadline,
-            deadlineEnabled,
-            milestoneCount: projectMilestones?.length || 0,
-            timestamp: new Date().toISOString(),
-          }),
-          createdAt: new Date().toISOString(),
-        });
-      });
-    } catch (transactionError: any) {
-      console.error("Transaction failed:", transactionError);
-      throw new Error(
-        `Database transaction failed: ${transactionError.message}`
-      );
-    }
-
-    // Fetch created milestones to include in response
-    const createdMilestones = await db
-      .select()
-      .from(milestones)
-      .where(eq(milestones.projectId, newProject.id))
-      .orderBy(milestones.id);
+    console.log("Project created with ID:", newProject.id);
+    console.log("Project contract address:", newProject.contractAddress);
+    // Log the project creation event in walletEvents
+    await db.insert(walletEvents).values({
+      userWalletId: userWalletId,
+      eventType: "project_created",
+      metadata: JSON.stringify({
+        projectId: newProject.id,
+        projectTitle: title,
+        contractAddress,
+        totalAmount,
+        charityAddress,
+        deadline: formattedDeadline,
+        deadlineEnabled,
+        timestamp: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+    });
 
     return NextResponse.json(
       {
@@ -265,14 +205,7 @@ export async function POST(request: NextRequest) {
           deadlineEnabled: newProject.deadlineEnabled,
           createdAt: newProject.createdAt,
         },
-        milestones: createdMilestones.map((m) => ({
-          id: m.id,
-          description: m.description,
-          amount: m.amount,
-          beneficiaryAddress: m.beneficiaryAddress,
-          status: m.status,
-        })),
-        message: "Project and milestones created successfully",
+        message: "Project created successfully",
       },
       { status: 201 }
     );
@@ -290,21 +223,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Handle transaction errors
-    if (error.message?.includes("Database transaction failed")) {
-      return NextResponse.json(
-        {
-          error: "Transaction failed",
-          message: "Failed to create project and milestones. Please try again.",
-        },
-        { status: 500 }
-      );
-    }
-
     return NextResponse.json(
       {
         error: "Internal server error",
-        message: error.message || "Failed to create project. Please try again.",
+        message: "Failed to create project. Please try again.",
       },
       { status: 500 }
     );

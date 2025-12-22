@@ -79,25 +79,25 @@ export const useAuthStore = create<AuthState>()(
       },
 
       checkAuth: async () => {
-        console.log('🔄 checkAuth called - current state:', get());
+        // console.log('🔄 checkAuth called - current state:', get());
         const currentState = get();
         if (currentState.loading) {
-          console.log('⏸️ Already loading, skipping');
+          // console.log('⏸️ Already loading, skipping');
           return;
         }
 
         set({ loading: true });
         try {
-          console.log('📡 Fetching /api/auth/me...');
+          // console.log('📡 Fetching /api/auth/me...');
           const res = await fetch("/api/auth/me", { credentials: "include" });
-          console.log('📊 Response status:', res.status, 'OK?', res.ok);
+          // console.log('📊 Response status:', res.status, 'OK?', res.ok);
 
           if (res.ok) {
             const data = await res.json();
-            console.log('📦 Response data:', data);
+            // console.log('📦 Response data:', data);
 
             if (data.user) {
-              console.log('👤 Setting user from API');
+              // console.log('👤 Setting user from API');
               set({ user: data.user, isAuthenticated: true, loading: false });
             } else {
               console.log('❌ No user in response');
@@ -136,11 +136,11 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
       }),
       onRehydrateStorage: () => (state) => {
-        console.log('💧 Zustand rehydrating from localStorage:', state);
+        // console.log('💧 Zustand rehydrating from localStorage:', state);
         
         // Fix: Set isAuthenticated based on user
         if (state && state.user) {
-          console.log('✅ Setting isAuthenticated: true from rehydrated user');
+          // console.log('✅ Setting isAuthenticated: true from rehydrated user');
           state.isAuthenticated = true;
           state.loading = false;
         }

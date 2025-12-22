@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   description:
     "Blockchain-based charity platform with Shariah-compliant milestone escrow",
 };
+import { Toaster } from "sonner";
 
 export default function RootLayout({
   children,
@@ -29,10 +30,11 @@ export default function RootLayout({
           data-debug="true"
           data-custom-data='{"appName": "YourApp", "version": "1.0.0", "greeting": "hi"}'
         />
-          <Web3Provider>
-            <Navbar />
-            {children}
-          </Web3Provider>
+        <Web3Provider>
+          <Navbar />
+          {children}
+          <Toaster position="top-right" richColors closeButton expand={true} />
+        </Web3Provider>
         {/* <VisualEditsMessenger /> */}
       </body>
     </html>

@@ -1,6 +1,6 @@
 "use client";
-
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -48,6 +48,7 @@ import { waitForTransactionReceipt, getTransactionReceipt } from "@wagmi/core";
 import { config } from "../../../../../config";
 import { Hash, Address, Log, Hex, TransactionType } from "viem";
 import { getProjectCreatedAddress } from "@/utils/getProjectCreatedAddress";
+import { useRouter } from "next/navigation";
 
 interface Milestone {
   id: string;
@@ -57,9 +58,10 @@ interface Milestone {
 }
 
 export default function CharityProjectCreation() {
+  const router = useRouter(); // ⬅️ Initialize the router
   const { address, isConnected, chain } = useAccount();
   const { writeContractAsync, isPending } = useWriteContract();
-
+  const [copyButtonText, setCopyButtonText] = useState("Copy TX Hash");
   const [projectTitle, setProjectTitle] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [zakatMode, setZakatMode] = useState(false);
@@ -281,11 +283,13 @@ export default function CharityProjectCreation() {
               );
             }
 
-            setCreatedProjectAddress(
-              projectContractAddress
-                ? `Project created! Contract: ${projectContractAddress}`
-                : "Project created! Transaction confirmed."
-            );
+            setCreatedProjectAddress(`${projectContractAddress}`);
+
+            // setCreatedProjectAddress(
+            //   projectContractAddress
+            //     ? `Project created! Contract: ${projectContractAddress}`
+            //     : "Project created! Transaction confirmed."
+            // );
           } else {
             const errorMsg = "❌ Transaction failed on chain";
             console.error(errorMsg);
@@ -500,9 +504,21 @@ export default function CharityProjectCreation() {
     return true;
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard!");
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    if (!text) {
+      toast.error("Nothing to copy");
+      return false;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      // Don't show toast here - let the button handle feedback
+      return true;
+    } catch (error) {
+      console.error("Failed to copy:", error);
+      toast.error("Failed to copy to clipboard");
+      return false;
+    }
   };
 
   const viewOnExplorer = (hash: string) => {
@@ -612,6 +628,13 @@ export default function CharityProjectCreation() {
     try {
       setDbSaveStatus("saving");
 
+      // Prepare milestones data
+      const milestonesData = milestones.map((m) => ({
+        description: m.description,
+        amount: parseFloat(m.amount),
+        beneficiaryAddress: m.beneficiaryAddress,
+      }));
+
       const response = await fetch("/api/projects/create", {
         method: "POST",
         headers: {
@@ -632,6 +655,7 @@ export default function CharityProjectCreation() {
           charityAddress: address,
           deadline: deadlineEnabled ? deadline : null, // Include deadline if enabled
           deadlineEnabled: deadlineEnabled, // Include deadlineEnabled flag
+          milestones: milestonesData,
         }),
       });
 
@@ -639,7 +663,7 @@ export default function CharityProjectCreation() {
 
       if (response.ok) {
         setDbSaveStatus("saved");
-        console.log("✅ Project saved to database:", result);
+        console.log("✅ Project and milestones saved to database:", result);
         toast.success("Project saved to database successfully");
       } else {
         setDbSaveStatus("error");
@@ -715,11 +739,32 @@ export default function CharityProjectCreation() {
         const builderAddress = milestones[0]
           .beneficiaryAddress as `0x${string}`;
 
-        // Use current timestamp + 1 year if deadline is disabled
-        const deadlineTimestamp = deadlineEnabled
-          ? BigInt(Math.floor(new Date(deadline).getTime() / 1000))
-          : BigInt(Math.floor(Date.now() / 1000) + 31536000); // 1 year from now if disabled
+        let deadlineTimestamp: bigint;
 
+        if (deadlineEnabled) {
+          // Use user-selected deadline
+          deadlineTimestamp = BigInt(
+            Math.floor(new Date(deadline).getTime() / 1000)
+          );
+
+          // Validate it's in the future
+          const now = BigInt(Math.floor(Date.now() / 1000));
+          if (deadlineTimestamp <= now) {
+            toast.error("Deadline must be in the future");
+            return;
+          }
+        } else {
+          // Set to a very distant future (e.g., Jan 1, 2100)
+          const distantFuture = new Date("2100-01-01T00:00:00Z");
+          deadlineTimestamp = BigInt(
+            Math.floor(distantFuture.getTime() / 1000)
+          );
+          console.log(
+            "⏰ Deadline disabled - using distant future:",
+            deadlineTimestamp.toString()
+          );
+        }
+        
         const goalAmountWei = parseEther(goalAmount);
 
         // Validate milestone totals
@@ -903,7 +948,10 @@ export default function CharityProjectCreation() {
                 <h3 className="font-semibold text-blue-800">
                   {debugMode ? "Debug Test Complete!" : "Project Created!"}
                 </h3>
-                <p className="text-blue-700 text-sm">{createdProjectAddress}</p>
+
+                <p className="text-blue-700 text-sm">
+                  Project contract address: {createdProjectAddress}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -1131,21 +1179,6 @@ export default function CharityProjectCreation() {
                 <FileText className="h-5 w-5" />
                 Project Milestones
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">
-                  Total: {getTotalBudget().toFixed(2)} MATIC
-                </Badge>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addMilestone}
-                  disabled={isSubmitting || debugMode || isConfirming}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Milestone
-                </Button>
-              </div>
             </CardTitle>
             <CardDescription>
               Define project phases with specific funding amounts and
@@ -1235,6 +1268,21 @@ export default function CharityProjectCreation() {
                 </div>
               </div>
             ))}
+            <div className="flex items-center gap-2 justify-end">
+              <Badge variant="outline">
+                Total: {getTotalBudget().toFixed(2)} MATIC
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addMilestone}
+                disabled={isSubmitting || debugMode || isConfirming}
+              >
+                <Plus className="h-4 w-4" />
+                Add Milestone
+              </Button>
+            </div>
 
             {!debugMode &&
               Math.abs(getTotalBudget() - parseFloat(goalAmount || "0")) >
@@ -1322,7 +1370,7 @@ export default function CharityProjectCreation() {
                       <p className="text-yellow-700 text-sm mb-2">
                         Transaction is being confirmed on the blockchain...
                       </p>
-                      <div className="flex flex-col sm:flex-row gap-2">
+                      {/* <div className="flex flex-col sm:flex-row gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -1341,11 +1389,21 @@ export default function CharityProjectCreation() {
                           <Copy className="h-4 w-4" />
                           Copy TX Hash
                         </Button>
+                        <Link
+                          href={`/projects/${address}`}
+                          className="flex-1"
+                          target="_blank"
+                        >
+                          <Button variant="outline" size="sm" className="gap-2">
+                            <ExternalLink className="h-4 w-4" />
+                            View Project
+                          </Button>
+                        </Link>
                       </div>
                       <p className="text-xs text-yellow-600 mt-2 font-mono">
                         {transactionHash.slice(0, 20)}...
                         {transactionHash.slice(-20)}
-                      </p>
+                      </p> */}
                     </div>
                   </div>
                 </CardContent>
@@ -1374,19 +1432,58 @@ export default function CharityProjectCreation() {
                           variant="outline"
                           size="sm"
                           className="gap-2"
-                          onClick={() => viewOnExplorer(transactionHash)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            viewOnExplorer(transactionHash);
+                          }}
                         >
                           <ExternalLink className="h-4 w-4" />
                           View Transaction
                         </Button>
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
                           className="gap-2"
-                          onClick={() => copyToClipboard(transactionHash)}
+                          disabled={copyButtonText === "Copied!"}
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            const success =
+                              await copyToClipboard(transactionHash);
+
+                            if (success) {
+                              setCopyButtonText("Copied!");
+
+                              // Reset after 2 seconds
+                              setTimeout(() => {
+                                setCopyButtonText("Copy TX Hash");
+                              }, 2000);
+                            }
+                          }}
                         >
-                          <Copy className="h-4 w-4" />
-                          Copy TX Hash
+                          {copyButtonText === "Copied!" ? (
+                            <CheckCircle2 className="h-4 w-4" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                          {copyButtonText}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            window.open(
+                              `/projects/${createdProjectAddress}`,
+                              "_blank"
+                            );
+                          }}
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                          View Project
                         </Button>
                       </div>
                       <p className="text-xs text-green-600 mt-2 font-mono">
@@ -1502,26 +1599,3 @@ export default function CharityProjectCreation() {
     </div>
   );
 }
-
-// function getProjectCreatedAddress(receipt: {
-//   blobGasPrice?: bigint | undefined;
-//   blobGasUsed?: bigint | undefined;
-//   blockHash: Hash;
-//   blockNumber: bigint;
-//   contractAddress: Address | null | undefined;
-//   cumulativeGasUsed: bigint;
-//   effectiveGasPrice: bigint;
-//   from: Address;
-//   gasUsed: bigint;
-//   logs: Log<bigint, number, false>[];
-//   logsBloom: Hex;
-//   root?: `0x${string}` | undefined;
-//   status: "success" | "reverted";
-//   to: Address | null;
-//   transactionHash: Hash;
-//   transactionIndex: number;
-//   type: TransactionType;
-//   chainId: 80002;
-// }) {
-//   throw new Error("Function not implemented.");
-// }

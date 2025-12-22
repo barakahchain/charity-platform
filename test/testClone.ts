@@ -12,7 +12,7 @@ import * as dotenv from "dotenv";
 // import ProjectAbi from "../artifacts/contracts/Project.sol/Project.json" assert { type: "json" };
 import ProjectAbi from "@/lib/abis/Project.json" assert { type: "json" };
 
-dotenv.config();
+dotenv.config({ path: ".env.local" });
 
 interface MilestoneReleasedEvent {
   index: bigint;
@@ -20,7 +20,7 @@ interface MilestoneReleasedEvent {
 }
 
 async function main() {
-  const cloneAddress = "0x164374295659ef538b563dc805afd97347d7cf45"; // use your clone address
+  const cloneAddress = "0xb409F197CE1f26Bdb0e60d8216f78DB038f58389"; // use your clone address
 
   const account = privateKeyToAccount(`0x${process.env.PRIVATE_KEY}`);
   const publicClient = createPublicClient({
